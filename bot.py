@@ -9,12 +9,10 @@ from analyzer import analyze_company
 # Load environmental variables from .env file
 load_dotenv()
 
-# Mapping the exact keys from your .env file
 API_ID = os.environ.get("TELEGRAM_API_ID")
 API_HASH = os.environ.get("TELEGRAM_API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-# Safeguard check to ensure variables are correctly loaded
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("One or more Telegram environment variables are missing from your .env file")
 
@@ -27,10 +25,7 @@ app = Client(
 )
 
 def register_user(user_id: int, username: str):
-    """
-    Registers a new user into the SQLite database.
-    Initial promotional strategy sets user_level = 1 (PRO tier) for everyone for free.
-    """
+    """Registers a new user and automatically grants promotional PRO tier for free."""
     conn = sqlite3.connect("valuelens.db")
     cursor = conn.cursor()
     cursor.execute("""
@@ -50,18 +45,23 @@ def increment_scan_count(user_id: int):
 
 @app.on_message(filters.command(["start", "help"]) & filters.private)
 async def send_welcome(client: Client, message: Message):
-    """Handles /start and /help commands asynchronously."""
+    """Handles /start command with a professional onboarding and financial disclaimer."""
     user_id = message.from_user.id
     username = message.from_user.username or "Anonymous"
     
     register_user(user_id, username)
     
     welcome_text = (
-        "📊 *Welcome to ValueLens Bot!*\n\n"
-        "Your asynchronous quantitative analyst for NASDAQ & S&P 500 stocks.\n"
-        "Powered by DeepSeek V4 infrastructure.\n\n"
-        "⚡ *PRO features have been automatically activated on your account for FREE!*\n\n"
-        "**How to use:** Simply send me any stock ticker (e.g., `AAPL`, `MSFT`, `TSLA`) to trigger a deep financial stress-test analysis."
+        "📊 **Welcome to ValueLens Bot!**\n\n"
+        "Your automated quantitative analyst for NASDAQ & S&P 500 stocks, "
+        "powered by DeepSeek V4 infrastructure.\n\n"
+        "⚡ **PRO features have been automatically activated on your account for FREE!**\n\n"
+        "**How to use:** Simply send me any stock ticker (e.g., `AAPL`, `MSFT`, `TSLA`) to trigger a deep financial stress-test analysis.\n\n"
+        "⚠️ **⚠️ FINANCIAL DISCLAIMER:**\n"
+        "_ValueLens is an automated software tool providing algorithmic data processing and quantitative analysis based on public metrics. "
+        "All generated reports are for educational and informational purposes only. "
+        "Nothing output by this bot constitutes investment, financial, legal, or tax advice. "
+        "Past performance is not indicative of future results. Always perform your own due diligence before investing._"
     )
     await message.reply_text(welcome_text, parse_mode=enums.ParseMode.MARKDOWN)
 
@@ -71,33 +71,24 @@ async def handle_ticker_analysis(client: Client, message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or "Anonymous"
     
-    # Ensure the user is registered in the DB
     register_user(user_id, username)
     
-    # Sanitize and extract the ticker symbol
     ticker = message.text.strip().upper()
     
-    # Regex validation for standard market tickers (1 to 5 alphabetic characters)
     if not re.match(r"^[A-Z]{1,5}$", ticker):
         await message.reply_text("❌ Invalid format. Please send a valid stock ticker symbol (e.g., AAPL or NVDA).")
         return
     
-    # Send a non-blocking placeholder while DeepSeek is processing
     waiting_msg = await message.reply_text(f"🔍 Fetching market data and running quantitative models for **{ticker}**... Please wait.")
     
     try:
-        # Execute the DeepSeek financial analysis logic
         analysis_result = analyze_company(ticker, user_id)
-        
-        # Track metric inside the database
         increment_scan_count(user_id)
         
-        # Delete placeholder and return the final report
         await waiting_msg.delete()
         await message.reply_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
         
     except Exception as e:
-        # Handle cases where waiting_msg might fail or need safe cleanup
         try:
             await waiting_msg.delete()
         except Exception:
