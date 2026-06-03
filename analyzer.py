@@ -2,82 +2,114 @@ import os
 import yfinance as yf
 from openai import OpenAI
 from dotenv import load_dotenv
-import sqlite3
 
-# Load environmental variables from .env file
+# Load environmental variables
 load_dotenv()
 
-# Initialize OpenAI client pointing to DeepSeek's API infrastructure
 ai_client = OpenAI(
     api_key=os.environ.get("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com"
 )
 
-def analyze_company(ticker: str, user_id: int) -> str:
+def analyze_company(ticker: str, mode: str) -> str:
     """
-    Fetches financial data from Yahoo Finance and routes it to DeepSeek V4 
-    Flash or Pro depending on the user's tier premium status.
+    Fetches financial data and routes it to DeepSeek.
+    mode can be 'PRO' or 'FLASH'.
     """
     try:
-        # 1. Fetch user level from SQLite database
-        conn = sqlite3.connect("valuelens.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_level FROM users WHERE user_id = ?", (user_id,))
-        res = cursor.fetchone()
-        conn.close()
+        # Handle crypto routing for yfinance
+        yf_ticker = "BTC-USD" if ticker.upper() == "BTC" else ticker.upper()
         
-        user_level = res[0] if res else 0
+        stock = yf.Ticker(yf_ticker)
+        info = stock.info
         
-        # 2. Dynamic model routing based on user tier
-        if user_level == 1:
+        # Determine model and prompt based on user selection
+        if mode == 'PRO':
             MODEL_NAME = "deepseek-v4-pro"
             system_style = (
-                "You are an institutional Senior Quantitative Analyst specializing in Value Investing. "
-                "Perform an advanced, cynical, and deeply analytical stress-test on the provided financial data. "
-                "CRITICAL RULES:\n"
-                "- Never use generic fluff, introductory filler, or clichés like 'the market is volatile'.\n"
-                "- Thoroughly evaluate the interplay between debt, margins, and valuation multiples (P/E, PEG).\n"
-                "- Be cold, mathematical, and concise.\n"
-                "- Structure your answer using Markdown bullet points into three specific sections: "
-                "[Metrics Synthesis], [Critical Risk Assessment], and [ValueLens Verdict]."
+                "You are an elite quantitative analyst. Provide a concise, punchy PRO analysis. "
+                "STRICT FORMATTING REQUIRED:\n"
+                "🔍 **[ValueLens PRO] | $TICKER (Company Name)**\n"
+                "💰 **Current Price:** $X | 🎯 **Est. Fair Value:** $Y (Discount/Premium %)\n\n"
+                "📊 **KEY METRICS**\n"
+                "• **P/E (Forward):** X.X (Short comment)\n"
+                "• **Net Margin:** X% (Short comment)\n"
+                "• **Debt/Equity:** X% (Short comment)\n"
+                "• **PEG Ratio:** X.X (Short comment)\n\n"
+                "🌡️ **SENTIMENT & MARKET**\n"
+                "• **Bull Sentiment:** 🟢/🟡/🔴 X% (Wall Street consensus)\n"
+                "• **Insider Flow:** (Buying/Selling/Neutral)\n\n"
+                "💡 **VALUELENS VERDICT**\n"
+                "(Max 4 lines. Clear, cynical, actionable insight on the pricing error or risk)."
             )
         else:
             MODEL_NAME = "deepseek-v4-flash"
             system_style = (
-                "You are a sharp, fast financial analyst. Provide a highly schematic, straight-to-the-point valuation. "
-                "CRITICAL RULES:\n"
-                "- Avoid pleasantries, generic disclaimers, or pre-programmed filler phrases.\n"
-                "- Focus purely on raw numbers and structural facts.\n"
-                "- Structure your answer using Markdown bullet points into three specific sections: "
-                "[Metrics Synthesis], [Critical Risk Assessment], and [ValueLens Verdict]."
+                "You are a fast market analyst. Provide an immediate, snapshot-style FLASH analysis. "
+                "STRICT FORMATTING REQUIRED:\n"
+                "⚡️ **[ValueLens FLASH] | $TICKER (Company Name)**\n"
+                "💰 **Current Price:** $X | 🔄 **Trend (7d):** X%\n\n"
+                "📊 **SNAPSHOT**\n"
+                "• **Bull Sentiment:** 🟢/🟡/🔴 X% (Short comment)\n"
+                "• **Key Support:** $X\n"
+                "• **Valuation Metric:** (e.g. MVRV for BTC, or P/E for stocks) (Short comment)\n\n"
+                "💡 **SYNTHESIS**\n"
+                "(Max 2 lines. Immediate trend takeaway)."
             )
 
-        # 3. Retrieve raw market metrics via yfinance
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
+        # Retrieve raw market metrics
         raw_data = (
-            f"Current Price: {info.get('currentPrice', 'N/A')}\n"
+            f"Current Price: {info.get('currentPrice', info.get('regularMarketPrice', 'N/A'))}\n"
             f"Market Cap: {info.get('marketCap', 'N/A')}\n"
             f"Trailing P/E: {info.get('trailingPE', 'N/A')}\n"
             f"Forward P/E: {info.get('forwardPE', 'N/A')}\n"
             f"PEG Ratio: {info.get('pegRatio', 'N/A')}\n"
             f"Profit Margins: {info.get('profitMargins', 'N/A')}\n"
             f"Debt-to-Equity: {info.get('debtToEquity', 'N/A')}\n"
+            f"52 Week High: {info.get('fiftyTwoWeekHigh', 'N/A')}\n"
+            f"52 Week Low: {info.get('fiftyTwoWeekLow', 'N/A')}\n"
         )
         
-        # 4. Execute the DeepSeek API call
         response = ai_client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_style},
-                {"role": "user", "content": f"Analyze the financial metrics for ticker: {ticker.upper()}.\nRaw Data:\n{raw_data}"}
+                {"role": "user", "content": f"Generate the {mode} report for ticker: {ticker.upper()}.\nData:\n{raw_data}"}
             ]
         )
         
-        # Prepend a premium or standard visual badge to the response
-        badge = "⚡ *[ValueLens PRO Analysis]*\n\n" if user_level == 1 else "📊 *[ValueLens Standard Analysis]*\n\n"
-        return badge + response.choices[0].message.content
+        return response.choices[0].message.content
         
     except Exception as e:
-        return f"❌ Error analyzing ticker {ticker.upper()}: {str(e)}"
+        return f"❌ Error analyzing {ticker.upper()}: {str(e)}"
+
+def get_value_radar(target_index: str) -> str:
+    """
+    Uses DeepSeek to act as a screener and identify undervalued anomalies in a specific index.
+    """
+    try:
+        system_style = (
+            "You are a Value Investing Screener. Your job is to identify 2 large-cap stocks "
+            "within the user's requested index that are currently fundamentally undervalued or mispriced by the market. "
+            "Do not use generic disclaimers. STRICT FORMATTING REQUIRED:\n"
+            "📡 **[Value Radar] | Market Anomalies Scan**\n"
+            "_I found 2 highly capitalized companies currently trading below their estimated intrinsic value:_\n\n"
+            "1️⃣ **$TICKER (Company Name)**\n"
+            "📉 **Est. Discount:** -X% vs Fair Value.\n"
+            "💬 *Why:* (Concise, cynical explanation of why the market is wrong, focusing on margins, P/E, and catalysts).\n\n"
+            "2️⃣ **$TICKER (Company Name)**\n"
+            "📉 **Est. Discount:** -X% vs Fair Value.\n"
+            "💬 *Why:* (Explanation)."
+        )
+        
+        response = ai_client.chat.completions.create(
+            model="deepseek-v4-pro", # Always use PRO for the radar scanner
+            messages=[
+                {"role": "system", "content": system_style},
+                {"role": "user", "content": f"Scan the {target_index} index and find 2 undervalued anomalies."}
+            ]
+        )
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        return f"❌ Error running Value Radar on {target_index}: {str(e)}"

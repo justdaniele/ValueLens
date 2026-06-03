@@ -3,10 +3,9 @@ import re
 import sqlite3
 from dotenv import load_dotenv
 from pyrogram import Client, filters, enums
-from pyrogram.types import Message
-from analyzer import analyze_company
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from analyzer import analyze_company, get_value_radar
 
-# Load environmental variables from .env file
 load_dotenv()
 
 API_ID = os.environ.get("TELEGRAM_API_ID")
@@ -14,25 +13,18 @@ API_HASH = os.environ.get("TELEGRAM_API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
-    raise ValueError("One or more Telegram environment variables are missing from your .env file")
+    raise ValueError("Missing Telegram environment variables in .env")
 
-# Initialize the Pyrogram Client as a Bot
-app = Client(
-    "valuelens_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+app = Client("valuelens_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 def init_db():
-    """Initializes the SQLite database and ensures the users table exists with the correct schema."""
     conn = sqlite3.connect("valuelens.db")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
-            user_level INTEGER DEFAULT 0,
+            user_level INTEGER DEFAULT 1,
             Scans_count INTEGER DEFAULT 0
         )
     """)
@@ -40,7 +32,6 @@ def init_db():
     conn.close()
 
 def register_user(user_id: int, username: str):
-    """Registers a new user and automatically grants promotional PRO tier for free."""
     conn = sqlite3.connect("valuelens.db")
     cursor = conn.cursor()
     cursor.execute("""
@@ -51,7 +42,6 @@ def register_user(user_id: int, username: str):
     conn.close()
 
 def increment_scan_count(user_id: int):
-    """Increments the total count of financial scans performed by the user."""
     conn = sqlite3.connect("valuelens.db")
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET Scans_count = Scans_count + 1 WHERE user_id = ?", (user_id,))
@@ -60,58 +50,94 @@ def increment_scan_count(user_id: int):
 
 @app.on_message(filters.command(["start", "help"]) & filters.private)
 async def send_welcome(client: Client, message: Message):
-    """Handles /start command with a professional onboarding and financial disclaimer."""
-    user_id = message.from_user.id
-    username = message.from_user.username or "Anonymous"
-    
-    register_user(user_id, username)
+    register_user(message.from_user.id, message.from_user.username or "Anonymous")
     
     welcome_text = (
         "📊 **Welcome to ValueLens Bot!**\n\n"
-        "Your automated quantitative analyst for NASDAQ & S&P 500 stocks, "
-        "powered by DeepSeek V4 infrastructure.\n\n"
-        "⚡ **PRO features have been automatically activated on your account for FREE!**\n\n"
-        "**How to use:** Simply send me any stock ticker (e.g., `AAPL`, `MSFT`, `TSLA`) to trigger a deep financial stress-test analysis.\n\n"
-        "⚠️ **FINANCIAL DISCLAIMER:**\n"
-        "_ValueLens is an automated software tool providing algorithmic data processing and quantitative analysis based on public metrics. "
-        "All generated reports are for educational and informational purposes only. "
-        "Nothing output by this bot constitutes investment, financial, legal, or tax advice. "
-        "Past performance is not indicative of future results. Always perform your own due diligence before investing._"
+        "Your quantitative analyst for Global Stocks & Crypto.\n"
+        "⚡ **PRO features activated for FREE!**\n\n"
+        "**Commands:**\n"
+        "• Send any ticker (e.g., `AAPL`, `BTC`) to analyze it.\n"
+        "• Use /radar to find undervalued market anomalies.\n\n"
+        "⚠️ _Disclaimer: Educational purposes only. Not financial advice._"
     )
     await message.reply_text(welcome_text, parse_mode=enums.ParseMode.MARKDOWN)
 
-@app.on_message(filters.text & filters.private)
-async def handle_ticker_analysis(client: Client, message: Message):
-    """Intercepts text messages asynchronously and checks if they are valid stock tickers."""
-    user_id = message.from_user.id
-    username = message.from_user.username or "Anonymous"
+@app.on_message(filters.command("radar") & filters.private)
+async def value_radar_menu(client: Client, message: Message):
+    """Triggers the Value Radar menu with inline index selection."""
+    register_user(message.from_user.id, message.from_user.username or "Anonymous")
     
-    register_user(user_id, username)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇺🇸 S&P 500", callback_data="radar:S&P 500")],
+        [InlineKeyboardButton("🦅 NASDAQ", callback_data="radar:NASDAQ")],
+        [InlineKeyboardButton("✨ Magnificent 7", callback_data="radar:Magnificent 7")]
+    ])
+    
+    await message.reply_text(
+        "📡 **[Value Radar]**\nSelect a market index to scan for undervalued anomalies:",
+        reply_markup=keyboard
+    )
+
+@app.on_message(filters.text & filters.private & ~filters.command(["start", "help", "radar"]))
+async def prompt_analysis_mode(client: Client, message: Message):
+    """Intercepts ticker and asks user for depth preference."""
+    register_user(message.from_user.id, message.from_user.username or "Anonymous")
     
     ticker = message.text.strip().upper()
-    
-    if not re.match(r"^[A-Z]{1,5}$", ticker):
-        await message.reply_text("❌ Invalid format. Please send a valid stock ticker symbol (e.g., AAPL or NVDA).")
+    if not re.match(r"^[A-Z0-9-]{1,8}$", ticker):
+        await message.reply_text("❌ Invalid format. Send a valid ticker (e.g., AAPL or BTC).")
         return
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚡️ FLASH", callback_data=f"analyze:FLASH:{ticker}"),
+            InlineKeyboardButton("🔍 PRO", callback_data=f"analyze:PRO:{ticker}")
+        ]
+    ])
     
-    waiting_msg = await message.reply_text(f"🔍 Fetching market data and running quantitative models for **{ticker}**... Please wait.")
+    await message.reply_text(
+        f"🤖 **Ticker recognized:** `${ticker}`\nSelect the analysis depth:",
+        reply_markup=keyboard
+    )
+
+@app.on_callback_query()
+async def handle_callbacks(client: Client, callback_query: CallbackQuery):
+    """Handles button clicks for both Analysis and Radar."""
+    user_id = callback_query.from_user.id
+    data = callback_query.data
     
-    try:
-        analysis_result = analyze_company(ticker, user_id)
-        increment_scan_count(user_id)
+    # --- TICKER ANALYSIS PATH ---
+    if data.startswith("analyze:"):
+        _, mode, ticker = data.split(":")
         
-        await waiting_msg.delete()
-        await message.reply_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
+        # Acknowledge the button press to remove loading icon
+        await callback_query.answer()
         
-    except Exception as e:
+        # Edit the original message to show a loading state
+        await callback_query.message.edit_text(f"🔍 Compiling {mode} report for **{ticker}**... Please wait.")
+        
         try:
-            await waiting_msg.delete()
-        except Exception:
-            pass
-        await message.reply_text(f"❌ An unexpected system error occurred: {str(e)}")
+            analysis_result = analyze_company(ticker, mode)
+            increment_scan_count(user_id)
+            await callback_query.message.edit_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
+        except Exception as e:
+            await callback_query.message.edit_text(f"❌ System error: {str(e)}")
+
+    # --- RADAR PATH ---
+    elif data.startswith("radar:"):
+        _, index_name = data.split(":")
+        
+        await callback_query.answer()
+        await callback_query.message.edit_text(f"📡 Scanning the **{index_name}** for value anomalies... Please wait.")
+        
+        try:
+            radar_result = get_value_radar(index_name)
+            await callback_query.message.edit_text(radar_result, parse_mode=enums.ParseMode.MARKDOWN)
+        except Exception as e:
+            await callback_query.message.edit_text(f"❌ Radar error: {str(e)}")
 
 if __name__ == "__main__":
-    # Ensure database infrastructure is ready before starting polling
     init_db()
-    print("ValueLens Telegram Bot is successfully running and listening for market tickers...")
+    print("ValueLens Telegram Bot UI is running...")
     app.run()
