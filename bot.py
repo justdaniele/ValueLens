@@ -54,12 +54,12 @@ async def send_welcome(client: Client, message: Message):
     
     welcome_text = (
         "📊 **Welcome to ValueLens Bot!**\n\n"
-        "Your quantitative analyst for Global Stocks & Crypto.\n"
+        "Your quantitative analyst for Global Stocks.\n"
         "⚡ **PRO features activated for FREE!**\n\n"
         "**Commands:**\n"
-        "• Send any ticker (e.g., `AAPL`, `BTC`) to analyze it.\n"
+        "• Send any ticker (e.g., `AAPL`, `MSFT`) to analyze it.\n"
         "• Use /radar to find undervalued market anomalies.\n\n"
-        "⚠️ _Disclaimer: Educational purposes only. Not financial advice._"
+        "⚠️ *Disclaimer: Educational purposes only. Not financial advice.*"
     )
     await message.reply_text(welcome_text, parse_mode=enums.ParseMode.MARKDOWN)
 
@@ -69,13 +69,15 @@ async def value_radar_menu(client: Client, message: Message):
     register_user(message.from_user.id, message.from_user.username or "Anonymous")
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇺🇸 S&P 500", callback_data="radar:S&P 500")],
-        [InlineKeyboardButton("🦅 NASDAQ", callback_data="radar:NASDAQ")],
-        [InlineKeyboardButton("✨ Magnificent 7", callback_data="radar:Magnificent 7")]
+        [InlineKeyboardButton("🇺🇸 S&P 500", callback_data="radar_idx:S&P 500")],
+        [InlineKeyboardButton("🦅 NASDAQ", callback_data="radar_idx:NASDAQ")],
+        [InlineKeyboardButton("✨ Magnificent 7", callback_data="radar_idx:Magnificent 7")],
+        [InlineKeyboardButton("🏭 Dow Jones", callback_data="radar_idx:Dow Jones")],
+        [InlineKeyboardButton("🔬 Russell 2000", callback_data="radar_idx:Russell 2000")]
     ])
     
     await message.reply_text(
-        "📡 **[Value Radar]**\nSelect a market index to scan for undervalued anomalies:",
+        "📡 **Value Radar**\nSelect a market index to scan for undervalued anomalies:",
         reply_markup=keyboard
     )
 
@@ -86,7 +88,7 @@ async def prompt_analysis_mode(client: Client, message: Message):
     
     ticker = message.text.strip().upper()
     if not re.match(r"^[A-Z0-9-]{1,8}$", ticker):
-        await message.reply_text("❌ Invalid format. Send a valid ticker (e.g., AAPL or BTC).")
+        await message.reply_text("❌ Invalid format. Send a valid ticker (e.g., AAPL).")
         return
 
     keyboard = InlineKeyboardMarkup([
@@ -97,26 +99,21 @@ async def prompt_analysis_mode(client: Client, message: Message):
     ])
     
     await message.reply_text(
-        f"🤖 **Ticker recognized:** `${ticker}`\nSelect the analysis depth:",
+        f"🤖 **Ticker recognized:** `{ticker}`\nSelect the analysis depth:",
         reply_markup=keyboard
     )
 
 @app.on_callback_query()
 async def handle_callbacks(client: Client, callback_query: CallbackQuery):
-    """Handles button clicks for both Analysis and Radar."""
+    """Handles all button clicks."""
     user_id = callback_query.from_user.id
     data = callback_query.data
     
-    # --- TICKER ANALYSIS PATH ---
+    # 1. Ticker Analysis Execution
     if data.startswith("analyze:"):
         _, mode, ticker = data.split(":")
-        
-        # Acknowledge the button press to remove loading icon
         await callback_query.answer()
-        
-        # Edit the original message to show a loading state
         await callback_query.message.edit_text(f"🔍 Compiling {mode} report for **{ticker}**... Please wait.")
-        
         try:
             analysis_result = analyze_company(ticker, mode)
             increment_scan_count(user_id)
@@ -124,15 +121,27 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         except Exception as e:
             await callback_query.message.edit_text(f"❌ System error: {str(e)}")
 
-    # --- RADAR PATH ---
-    elif data.startswith("radar:"):
+    # 2. Radar Index Selected -> Ask for Mode
+    elif data.startswith("radar_idx:"):
         _, index_name = data.split(":")
-        
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⚡️ FLASH", callback_data=f"radar_run:FLASH:{index_name}"),
+                InlineKeyboardButton("🔍 PRO", callback_data=f"radar_run:PRO:{index_name}")
+            ]
+        ])
+        await callback_query.message.edit_text(
+            f"📡 **Index:** {index_name}\nSelect scanning depth:",
+            reply_markup=keyboard
+        )
+
+    # 3. Radar Execution
+    elif data.startswith("radar_run:"):
+        _, mode, index_name = data.split(":")
         await callback_query.answer()
-        await callback_query.message.edit_text(f"📡 Scanning the **{index_name}** for value anomalies... Please wait.")
-        
+        await callback_query.message.edit_text(f"📡 Scanning the **{index_name}** ({mode} mode)... Please wait.")
         try:
-            radar_result = get_value_radar(index_name)
+            radar_result = get_value_radar(index_name, mode)
             await callback_query.message.edit_text(radar_result, parse_mode=enums.ParseMode.MARKDOWN)
         except Exception as e:
             await callback_query.message.edit_text(f"❌ Radar error: {str(e)}")
