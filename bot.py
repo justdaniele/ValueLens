@@ -24,6 +24,21 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
+def init_db():
+    """Initializes the SQLite database and ensures the users table exists with the correct schema."""
+    conn = sqlite3.connect("valuelens.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            user_level INTEGER DEFAULT 0,
+            Scans_count INTEGER DEFAULT 0
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 def register_user(user_id: int, username: str):
     """Registers a new user and automatically grants promotional PRO tier for free."""
     conn = sqlite3.connect("valuelens.db")
@@ -57,7 +72,7 @@ async def send_welcome(client: Client, message: Message):
         "powered by DeepSeek V4 infrastructure.\n\n"
         "⚡ **PRO features have been automatically activated on your account for FREE!**\n\n"
         "**How to use:** Simply send me any stock ticker (e.g., `AAPL`, `MSFT`, `TSLA`) to trigger a deep financial stress-test analysis.\n\n"
-        "⚠️ **⚠️ FINANCIAL DISCLAIMER:**\n"
+        "⚠️ **FINANCIAL DISCLAIMER:**\n"
         "_ValueLens is an automated software tool providing algorithmic data processing and quantitative analysis based on public metrics. "
         "All generated reports are for educational and informational purposes only. "
         "Nothing output by this bot constitutes investment, financial, legal, or tax advice. "
@@ -96,5 +111,7 @@ async def handle_ticker_analysis(client: Client, message: Message):
         await message.reply_text(f"❌ An unexpected system error occurred: {str(e)}")
 
 if __name__ == "__main__":
+    # Ensure database infrastructure is ready before starting polling
+    init_db()
     print("ValueLens Telegram Bot is successfully running and listening for market tickers...")
     app.run()
