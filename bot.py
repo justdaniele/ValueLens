@@ -8,7 +8,16 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified
 from analyzer import analyze_company, get_value_radar
-from database import init_db, register_user, get_user_language, set_user_language, increment_scan_count, DB_NAME
+# Integrated the historical evaluation loop from the database architecture
+from database import (
+    init_db, 
+    register_user, 
+    get_user_language, 
+    set_user_language, 
+    increment_scan_count, 
+    evaluate_historical_accuracy_loop, 
+    DB_NAME
+)
 
 load_dotenv()
 
@@ -73,7 +82,7 @@ STRINGS = {
             "💡 **Verdetto:** Le valutazioni di mercato sono tese; gli insider preferiscono tenere liquidità.\n\n"
             "📢 **Unisciti al nostro Canale Telegram:** [ValueLens Insider Signals](" + CHANNEL_LINK + ")\n"
             "Non appena vengono rilevate anomalie ad alta convinzione, vengono pubblicate istantaneamente lì! "
-            "Il canale ospita anche il nostro **Virtual Tracker Portfolio**, che monitora le performance reali e il ROI "
+            "The canal ospita anche il nostro **Virtual Tracker Portfolio**, che monitora le performance reali e il ROI "
             "di tutti i segnali passati dalla loro esatta data di rilevamento."
         )
     }
@@ -87,6 +96,26 @@ def placeholder_insider_scanner():
     """Simulates the 1,000 company network scan operations on first boot."""
     import time
     time.sleep(120) 
+
+async def background_scheduler(client: Client):
+    """
+    Independent asynchronous background worker loop.
+    Periodically executes background metrics validation and system routines.
+    """
+    import logging
+    scheduler_logger = logging.getLogger("ValueLensScheduler")
+    scheduler_logger.info("Persistent background engine execution thread started.")
+    
+    while True:
+        try:
+            # Offloads the blocking SQLite evaluation to a safe separate execution thread
+            scheduler_logger.info("Executing scheduled accuracy validation loops across historical predictions...")
+            await asyncio.to_thread(evaluate_historical_accuracy_loop)
+        except Exception as e:
+            scheduler_logger.error(f"Error caught during background scheduler execution: {e}")
+        
+        # Check tracking states precisely every hour (3600 seconds)
+        await asyncio.sleep(3600)
 
 @app.on_message(filters.command("start") & filters.private)
 async def send_welcome(client: Client, message: Message):
@@ -263,7 +292,6 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
             increment_scan_count(user_id)
             await callback_query.message.edit_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
         except MessageNotModified:
-            # Traps and swallows identical concurrent text overwrites on double clicks safely
             pass
         except Exception as e:
             await callback_query.message.edit_text(f"❌ System error: {str(e)}")
@@ -294,13 +322,24 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
             radar_result = get_value_radar(index_name, mode, lang)
             await callback_query.message.edit_text(radar_result, parse_mode=enums.ParseMode.MARKDOWN)
         except MessageNotModified:
-            # Safe boundary check: traps duplicate asynchronous rendering collisions silently
             pass
         except Exception as e:
             await callback_query.message.edit_text(f"❌ Radar error: {str(e)}")
 
 
 if __name__ == "__main__":
+    from pyrogram import idle
+    
+    # 1. Structural DB Setup
     init_db()
     print("ValueLens Telegram Bot UI is running...")
-    app.run()
+    
+    # 2. Start the Client Instance
+    app.start()
+    
+    # 3. Inject the worker loop safely into Pyrogram's running asynchronous frame
+    asyncio.get_event_loop().create_task(background_scheduler(app))
+    
+    # 4. Keep running until an external interrupt (Ctrl+C / Kill signal) is received
+    idle()
+    app.stop()

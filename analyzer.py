@@ -1,9 +1,13 @@
 import os
+import logging
 import yfinance as yf
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure module logger to align with the ecosystem log stream
+logger = logging.getLogger("ValueLensAnalyzer")
 
 ai_client = OpenAI(
     api_key=os.environ.get("DEEPSEEK_API_KEY"),
@@ -13,6 +17,7 @@ ai_client = OpenAI(
 def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
     """Compiles single equity evaluations with highly scannable paragraph spaces and clean Markdown."""
     try:
+        logger.info(f"Launching {mode} analysis routine for ticker asset: {ticker.upper()}")
         yf_ticker = "BTC-USD" if ticker.upper() == "BTC" else ticker.upper()
         stock = yf.Ticker(yf_ticker)
         info = stock.info or {}
@@ -23,12 +28,23 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
             try:
                 cf = stock.cashflow
                 fin = stock.financials
-                if cf is not None and not cf.empty and 'Operating Cash Flow' in cf.index:
-                    ocf_val = cf.loc['Operating Cash Flow'].iloc[0]
-                if fin is not None and not fin.empty and 'Net Income' in fin.index:
-                    ni_val = fin.loc['Net Income'].iloc[0]
-            except Exception:
-                pass
+                
+                if cf is not None and not cf.empty:
+                    # Flexible lookups to handle structural naming changes across yfinance versions
+                    ocf_keys = ['Operating Cash Flow', 'OperatingCashFlow', 'Total Cash From Operating Activities']
+                    for key in ocf_keys:
+                        if key in cf.index:
+                            ocf_val = cf.loc[key].iloc[0]
+                            break
+                            
+                if fin is not None and not fin.empty:
+                    ni_keys = ['Net Income', 'NetIncome', 'Net Income Common Stockholders']
+                    for key in ni_keys:
+                        if key in fin.index:
+                            ni_val = fin.loc[key].iloc[0]
+                            break
+            except Exception as fe:
+                logger.warning(f"Financial statement extraction skipped for {ticker.upper()}: {fe}")
 
         # Critical layout rules enforced on the LLM engine to guarantee UI scannability
         safety_rules = (
@@ -151,6 +167,7 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
             f"Is Crypto: {is_crypto}\n"
         )
         
+        logger.info(f"Dispatching payload context to DeepSeek endpoint model: {MODEL_NAME}")
         response = ai_client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
@@ -160,11 +177,13 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
+        logger.error(f"Critical execution failure during stock analysis for {ticker.upper()}: {e}")
         return f"❌ Error analyzing {ticker.upper()}: {str(e)}"
 
 def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
     """Scans systematic indices and outputs beautifully spaced, non-congested asset reports."""
     try:
+        logger.info(f"Initializing systematic Index Radar scan sequence for target: {target_index} ({mode})")
         model_choice = "deepseek-v4-pro" if mode == 'PRO' else "deepseek-v4-flash"
         
         base_rules = (
@@ -280,6 +299,7 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
                     "(Apply the same quick flash layout structure)"
                 )
 
+        logger.info(f"Executing index analysis completion using model framework: {model_choice}")
         response = ai_client.chat.completions.create(
             model=model_choice,
             messages=[
@@ -289,4 +309,5 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
+        logger.error(f"Error caught running Value Radar on financial index {target_index}: {e}")
         return f"❌ Error running Value Radar on {target_index}: {str(e)}"
