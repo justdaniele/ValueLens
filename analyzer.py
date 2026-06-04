@@ -3,7 +3,6 @@ import yfinance as yf
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environmental variables
 load_dotenv()
 
 ai_client = OpenAI(
@@ -17,11 +16,8 @@ def analyze_company(ticker: str, mode: str) -> str:
         yf_ticker = "BTC-USD" if ticker.upper() == "BTC" else ticker.upper()
         stock = yf.Ticker(yf_ticker)
         info = stock.info or {}
-        
-        # Check if the asset is a cryptocurrency to exclude it from corporate stress-tests
         is_crypto = yf_ticker.endswith("-USD") or yf_ticker == "BTC-USD"
         
-        # Defensive fetch for Operating Cash Flow and Net Income (Corporate only)
         ocf_val = "N/A"
         ni_val = "N/A"
         
@@ -36,7 +32,6 @@ def analyze_company(ticker: str, mode: str) -> str:
             except Exception:
                 pass
 
-        # Base formatting rules to prevent Telegram parsing errors and unwanted cashtags
         safety_rules = (
             "CRITICAL FORMATTING RULES:\n"
             "- DO NOT use the '$' symbol before any ticker (e.g. write MSFT, never $MSFT).\n"
@@ -45,7 +40,7 @@ def analyze_company(ticker: str, mode: str) -> str:
         )
 
         if mode == 'PRO':
-            MODEL_NAME = "deepseek-v4-pro"  # Replace with "deepseek-chat" if using standard official API endpoints
+            MODEL_NAME = "deepseek-v4-pro"
             system_style = safety_rules + (
                 "You are an elite quantitative analyst. Provide a concise, punchy PRO analysis.\n"
                 "If 'Is Crypto' is True, write 'N/A (Crypto Asset)' under the ADVANCED STRESS-TESTS block.\n"
@@ -67,7 +62,7 @@ def analyze_company(ticker: str, mode: str) -> str:
                 "(Max 4 lines. Clear, cynical insight on pricing errors, growth illusions, or financial quality risks)."
             )
         else:
-            MODEL_NAME = "deepseek-v4-flash"  # Replace with "deepseek-chat" if using standard official API endpoints
+            MODEL_NAME = "deepseek-v4-flash"
             system_style = safety_rules + (
                 "You are a fast market analyst. Provide an immediate FLASH snapshot.\n"
                 "If 'Is Crypto' is True, write 'N/A (Crypto)' in the Risk Check bullet.\n"
@@ -83,7 +78,6 @@ def analyze_company(ticker: str, mode: str) -> str:
                 "(Max 2 lines. Immediate actionable takeaway)."
             )
 
-        # Robust extraction utilizing 'or' chains to capture missing values or explicit None types safely
         price_val = info.get('currentPrice') or info.get('regularMarketPrice') or 'N/A'
         market_cap = info.get('marketCap') or 'N/A'
         trailing_pe = info.get('trailingPE') or 'N/A'
@@ -112,60 +106,63 @@ def analyze_company(ticker: str, mode: str) -> str:
                 {"role": "user", "content": f"Generate {mode} report for {ticker.upper()}.\nData:\n{raw_data}"}
             ]
         )
-        
         return response.choices[0].message.content
         
     except Exception as e:
         return f"❌ Error analyzing {ticker.upper()}: {str(e)}"
 
 def get_value_radar(target_index: str, mode: str) -> str:
-    """Scans an index for undervalued stocks forcing Reverse DCF and Zombie metrics, excluding crypto."""
+    """Scans an index for corporate value anomalies with readable stress tests and debt checks."""
     try:
         model_choice = "deepseek-v4-pro" if mode == 'PRO' else "deepseek-v4-flash"
         
-        base_rules = (
-            "You are a Value Screener. Find 2 highly capitalized corporate stocks in the requested index "
-            "that are structurally undervalued. CRITICAL: EXCLUDE any cryptocurrencies or digital assets (e.g. no BTC).\n"
-            "For each chosen corporate stock, you MUST execute a Reverse DCF calculation (implied 10-year growth expectations) "
-            "and a Zombie Detector check (compare Net Income vs real Operating Cash Flow to prove earnings quality).\n"
-            "CRITICAL FORMATTING: DO NOT use the '$' symbol before tickers (e.g. write AAPL). "
-            "DO NOT use underscores (_) for italics. Use asterisks (*) for bold only."
-        )
-        
+        # Completely re-engineered layout instructions to force neat bullets, clear inline explanations and explicit debt data
         if mode == 'PRO':
-            system_style = base_rules + (
-                "\nSTRICT TEMPLATE:\n"
-                "📡 **Value Radar PRO | Market Anomalies Scan**\n"
-                "I found 2 large-cap companies trading below intrinsic value:\n\n"
+            system_style = (
+                "You are an elite quantitative asset manager scanning index components.\n"
+                "CRITICAL FORMATTING RULES:\n"
+                "- DO NOT use the '$' symbol before any ticker names (e.g. write AAPL, never $AAPL).\n"
+                "- DO NOT use underscores (_) for italics. Use asterisks (*) for bold text formatting only.\n"
+                "- DO NOT wrap text in square brackets [ ] or piping lines |.\n"
+                "STRICT OUTPUT TEMPLATE:\n\n"
+                "📡 **Value Lens Radar PRO | {INDEX_NAME} Scan**\n"
+                "Scanned index components. Found 2 corporate equities trading at clear structural discounts:\n\n"
                 "1️⃣ **TICKER (Company Name)**\n"
-                "📉 **Est. Discount:** -X% vs Fair Value.\n"
-                "🧮 **Stress-Tests:** [Reverse DCF CAGR: X%] | [Zombie Check: Pass/Fail based on OCF vs Net Income]\n"
-                "💬 **Deep Analysis:** (3-4 lines explaining margins, catalysts, and why the market growth expectation is wrong).\n\n"
+                "📉 **Est. Discount:** -X% vs Fair Value\n"
+                "⚠️ **Financial Debt:** Debt/Equity ratio is X% (Provide an absolute assessment of debt risk and bankruptcy safety)\n"
+                "🧮 **Reverse DCF Model:** X% Implied 10y Growth Rate\n"
+                "   ↳ *Market Expectation:* The current stock price assumes the company grows its cash flows by only X% annually over the next decade. If actual operations exceed this low hurdle rate, the equity is severely mispriced.\n"
+                "🧟 **Zombie Detector:** Pass/Fail (TTM Operating Cash Flow: $X vs Net Income: $Y)\n"
+                "   ↳ *Earnings Quality:* Proves accounting net profits are fully backed by tangible cash coming through corporate operations, verifying it is a healthy business and not a dying debt-fueled entity.\n"
+                "💬 **Deep Value Catalyst:** (3-4 lines explaining margin trends, market pricing flaws, or business model moats providing a deep-value buffer).\n\n"
                 "2️⃣ **TICKER (Company Name)**\n"
-                "📉 **Est. Discount:** -X% vs Fair Value.\n"
-                "🧮 **Stress-Tests:** (Reverse DCF & Zombie details).\n"
-                "💬 **Deep Analysis:** (Explanation)."
-            )
+                "(Apply the exact same clear block format for the second stock asset)"
+            ).replace("{INDEX_NAME}", target_index.upper())
         else:
-            system_style = base_rules + (
-                "\nSTRICT TEMPLATE:\n"
-                "📡 **Value Radar FLASH | Quick Scan**\n"
-                "Top 2 undervalued alerts (excluding crypto):\n\n"
+            system_style = (
+                "You are a fast market analyst scanning structural index anomalies.\n"
+                "CRITICAL FORMATTING RULES:\n"
+                "- DO NOT use the '$' symbol before any ticker names (e.g. write AAPL).\n"
+                "- DO NOT use underscores (_) for italics. Use asterisks (*) for bold text formatting only.\n"
+                "- DO NOT use square brackets [ ] or horizontal pipe separators |.\n"
+                "STRICT OUTPUT TEMPLATE:\n\n"
+                "⚡️ **Value Lens Radar FLASH | {INDEX_NAME} Quick Scan**\n"
+                "Top 2 immediate value alerts backed by positive cash generation:\n\n"
                 "1️⃣ **TICKER (Company Name)**\n"
-                "📉 **Discount:** -X%\n"
-                "⚡️ **Risk Checks:** [Implied Growth: X%] | [Cash Quality: Good/Poor]\n"
-                "💡 **Trigger:** (1 line summary of why it's cheap and the entry catalyst).\n\n"
+                "📉 **Discount:** -X% vs Fair Value\n"
+                "⚠️ **Debt Profile:** Debt/Equity: X% (Safe/Caution)\n"
+                "📊 **Reverse DCF Valuation:** X% Implied 10y CAGR (The growth bar set by current market pricing is exceptionally low)\n"
+                "🧟 **Cash Quality:** Good/Poor (Real operating cash flow securely backs or fails accounting profits)\n"
+                "💡 **Actionable Trigger:** (1-2 lines summarizing why the company is trading cheap and the near-term structural market catalyst).\n\n"
                 "2️⃣ **TICKER (Company Name)**\n"
-                "📉 **Discount:** -X%\n"
-                "⚡️ **Risk Checks:** (Growth & Cash status).\n"
-                "💡 **Trigger:** (1 line summary)."
-            )
+                "(Apply the exact same clear block format for the second stock asset)"
+            ).replace("{INDEX_NAME}", target_index.upper())
 
         response = ai_client.chat.completions.create(
             model=model_choice,
             messages=[
                 {"role": "system", "content": system_style},
-                {"role": "user", "content": f"Scan the {target_index} index, find 2 corporate anomalies, and compute stress-tests."}
+                {"role": "user", "content": f"Scan the {target_index} index, extract 2 undervalued corporate stocks, and run structural stress-tests."}
             ]
         )
         return response.choices[0].message.content

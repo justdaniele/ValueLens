@@ -16,6 +16,9 @@ API_HASH = os.environ.get("TELEGRAM_API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 LOCK_FILE = "scan.lock"
 
+# Placeholder for your future Telegram channel link
+CHANNEL_LINK = "https://t.me/your_channel_username" 
+
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("Missing Telegram environment variables in .env")
 
@@ -55,15 +58,16 @@ async def send_help(client: Client, message: Message):
 
     register_user(message.from_user.id, message.from_user.username or "Anonymous")
 
+    # Kept commands completely free of markdown styling to ensure native Telegram clickability
     help_text = (
         "📖 **ValueLens Bot | Command Reference**\n\n"
-        "• `/start` - Initialize the bot and check subscription status.\n"
-        "• `/help` - Show this command reference guide.\n"
-        "• `/radar` - Scan entire indices (e.g., S&P 500, NASDAQ) for value anomalies.\n"
-        "• `/insider` - View active corporate insider buying alerts on the US market.\n"
-        "• **Send a Ticker** - Directly type any stock symbol (e.g., `AAPL`, `MSFT`) to run a custom FLASH or PRO quantitative analysis report."
+        "• /start - Initialize the bot and check registration.\n"
+        "• /help - Show this interactive command guide.\n"
+        "• /radar - Scan indices (e.g., S&P 500) for structural value anomalies.\n"
+        "• /insider - View active real-time C-Suite corporate insider buying alerts.\n\n"
+        "💡 **Direct Analysis:** Just type any stock ticker symbol (e.g., AAPL, MSFT) directly in chat to compile custom FLASH or PRO reports."
     )
-    await message.reply_text(help_text, parse_mode=enums.ParseMode.MARKDOWN)
+    await message.reply_text(help_text, parse_mode=enums.ParseMode.NONE)
 
 @app.on_message(filters.command("radar") & filters.private)
 async def value_radar_menu(client: Client, message: Message):
@@ -97,11 +101,21 @@ async def view_insider_signals(client: Client, message: Message):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Check if the database has ever executed a scan before
     cursor.execute("SELECT value FROM metadata WHERE key = 'last_insider_scan'")
     last_scan_status = cursor.fetchone()[0]
     
-    # First-time initialization trigger
+    # Text templates with integrated channel invitations and Virtual Tracker descriptions
+    no_result_text = (
+        "🚨 **ValueLens INSIDER | No Signals Found**\n\n"
+        "Top 1,000 US companies scanned. Currently, **zero** entities match our high-conviction criteria "
+        "(Price near 52-week lows + Aggressive corporate executive buying within the last 6 months).\n\n"
+        "💡 **Verdict:** Market valuations are stretched; insiders are holding cash. Rescanning tonight.\n\n"
+        "📢 **Join our Telegram Channel:** [ValueLens Alpha](" + CHANNEL_LINK + ")\n"
+        "When high-conviction anomalies are discovered, they are instantly broadcasted there! "
+        "The channel also hosts our **Virtual Tracker Portfolio**, monitoring real-time performance and ROI "
+        "of all past insider alerts from their exact detection date."
+    )
+    
     if last_scan_status == "NEVER":
         status_msg = await message.reply_text(
             "🚀 **First-Time Initialization**\n\nThe global insider database is currently empty. "
@@ -113,9 +127,7 @@ async def view_insider_signals(client: Client, message: Message):
             lock.write("locked")
             
         try:
-            # Run heavy operation inside a background thread to maintain UI responsiveness
             await asyncio.to_thread(placeholder_insider_scanner)
-            
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("UPDATE metadata SET value = ? WHERE key = 'last_insider_scan'", (now_str,))
             conn.commit()
@@ -134,14 +146,7 @@ async def view_insider_signals(client: Client, message: Message):
         conn.close()
         
         if not rows:
-            no_result_text = (
-                "🚨 **ValueLens INSIDER | No Signals Found**\n\n"
-                "Initial setup complete. Top 1,000 US companies scanned. Currently, **zero** entities match high-conviction criteria "
-                "(Price near 52-week lows + Aggressive executive buying within the last 6 months).\n\n"
-                "💡 **Verdict:** Market valuations are stretched; insiders are not buying at current levels. Hold cash. "
-                "Rescanning tonight."
-            )
-            await status_msg.edit_text(no_result_text, parse_mode=enums.ParseMode.MARKDOWN)
+            await status_msg.edit_text(no_result_text, parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
             return
         else:
             response_text = "🕵️‍♂️ **ValueLens INSIDER | Active US Signals**\n"
@@ -149,24 +154,16 @@ async def view_insider_signals(client: Client, message: Message):
             for row in rows:
                 ticker, date, price = row
                 response_text += f"• **{ticker}**\n  ↳ Detected on: {date}\n  ↳ Entry Price: ${price:.2f}\n\n"
-            response_text += "💡 *You can analyze these tickers individually by sending them in chat to view the updated Reverse DCF.*"
+            response_text += "💡 *Analyze these tickers individually by sending them in chat to view the updated Reverse DCF.*"
             await status_msg.edit_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
             return
 
-    # Regular runtime operation
     cursor.execute("SELECT ticker, date_detected, price_detected FROM insider_signals WHERE status = 'ACTIVE' ORDER BY date_detected DESC")
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
-        no_result_text = (
-            "🚨 **ValueLens INSIDER | No Signals Found**\n\n"
-            "Top 1,000 US companies scanned. Currently, **zero** entities match high-conviction criteria "
-            "(Price near 52-week lows + Aggressive executive buying within the last 6 months).\n\n"
-            "💡 **Verdict:** Market valuations are stretched; insiders are not buying at current levels. Hold cash. "
-            "Rescanning tonight."
-        )
-        await message.reply_text(no_result_text, parse_mode=enums.ParseMode.MARKDOWN)
+        await message.reply_text(no_result_text, parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
         return
 
     response_text = "🕵️‍♂️ **ValueLens INSIDER | Active US Signals**\n"
@@ -213,7 +210,6 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("🤖 Server busy with nightly database maintenance. Please wait.", show_alert=True)
         return
     
-    # 1. Ticker Analysis Execution
     if data.startswith("analyze:"):
         _, mode, ticker = data.split(":")
         await callback_query.answer()
@@ -225,7 +221,6 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         except Exception as e:
             await callback_query.message.edit_text(f"❌ System error: {str(e)}")
 
-    # 2. Radar Index Selected -> Ask for Mode
     elif data.startswith("radar_idx:"):
         _, index_name = data.split(":")
         keyboard = InlineKeyboardMarkup([
@@ -239,7 +234,6 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
             reply_markup=keyboard
         )
 
-    # 3. Radar Execution
     elif data.startswith("radar_run:"):
         _, mode, index_name = data.split(":")
         await callback_query.answer()
