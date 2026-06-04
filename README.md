@@ -1,4 +1,3 @@
-Markdown
 # ValueLens Bot 📡
 
 A lightweight, high-performance Telegram bot powered by **Pyrogram** and **DeepSeek-v4**, engineered to deliver institutional-grade equity valuations and corporate insider tracking directly to your mobile screen.
