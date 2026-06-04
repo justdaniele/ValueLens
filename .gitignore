@@ -1,6 +1,18 @@
 .env
 venv/
 __pycache__/
+*.pyc
+*.pyo
+
+# SQLite Database Files
 *.db
 *.db-wal
 *.db-shm
+
+# Pyrogram Session Files (CRITICAL)
+*.session
+*.session-journal
+
+# System Metadata Files
+.DS_Store
+Thumbs.db

@@ -229,6 +229,7 @@ async def prompt_analysis_mode(client: Client, message: Message):
     ])
     await message.reply_text(STRINGS[lang]["ticker_prompt"].format(ticker=ticker), reply_markup=keyboard)
 
+
 @app.on_callback_query()
 async def handle_callbacks(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -244,16 +245,26 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         _, selected_lang = data.split(":")
         set_user_language(user_id, selected_lang)
         await callback_query.answer()
-        await callback_query.message.edit_text(STRINGS[selected_lang]["lang_success"])
+        try:
+            await callback_query.message.edit_text(STRINGS[selected_lang]["lang_success"])
+        except MessageNotModified:
+            pass
 
     elif data.startswith("analyze:"):
         _, mode, ticker = data.split(":")
         await callback_query.answer()
-        await callback_query.message.edit_text(STRINGS[lang]["compiling_report"].format(mode=mode, ticker=ticker))
+        try:
+            await callback_query.message.edit_text(STRINGS[lang]["compiling_report"].format(mode=mode, ticker=ticker))
+        except MessageNotModified:
+            pass
+            
         try:
             analysis_result = analyze_company(ticker, mode, lang)
             increment_scan_count(user_id)
             await callback_query.message.edit_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
+        except MessageNotModified:
+            # Traps and swallows identical concurrent text overwrites on double clicks safely
+            pass
         except Exception as e:
             await callback_query.message.edit_text(f"❌ System error: {str(e)}")
 
@@ -265,13 +276,15 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
                 InlineKeyboardButton("🔍 PRO", callback_data=f"radar_run:PRO:{index_name}")
             ]
         ])
-        await callback_query.message.edit_text(STRINGS[lang]["radar_scan_depth"].format(index=index_name), reply_markup=keyboard)
+        try:
+            await callback_query.message.edit_text(STRINGS[lang]["radar_scan_depth"].format(index=index_name), reply_markup=keyboard)
+        except MessageNotModified:
+            pass
 
     elif data.startswith("radar_run:"):
         _, mode, index_name = data.split(":")
         await callback_query.answer()
         
-        # Defensive block to trap and gracefully bypass duplicate double-click interaction updates
         try:
             await callback_query.message.edit_text(STRINGS[lang]["radar_running"].format(index=index_name, mode=mode))
         except MessageNotModified:
@@ -280,8 +293,12 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         try:
             radar_result = get_value_radar(index_name, mode, lang)
             await callback_query.message.edit_text(radar_result, parse_mode=enums.ParseMode.MARKDOWN)
+        except MessageNotModified:
+            # Safe boundary check: traps duplicate asynchronous rendering collisions silently
+            pass
         except Exception as e:
             await callback_query.message.edit_text(f"❌ Radar error: {str(e)}")
+
 
 if __name__ == "__main__":
     init_db()
