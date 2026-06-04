@@ -25,16 +25,24 @@ pip install pyrogram tgcrypto yfinance openai python-dotenv
 2. Environment Configuration
 Create a secure .env file in the root directory:
 
+```
 Ini, TOML
 TELEGRAM_API_ID=your_api_id
 TELEGRAM_API_HASH=your_api_hash
 TELEGRAM_BOT_TOKEN=your_bot_token
 DEEPSEEK_API_KEY=your_deepseek_key
+```
 
 
 3. Execution
+```
 Bash
 python bot.py
+
+```
+
+⚠️ Disclaimer
+This software is developed strictly for educational and research purposes. Algorithmic outputs do not constitute formal financial or investment advice.
 
 
 
