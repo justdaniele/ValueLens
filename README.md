@@ -41,11 +41,6 @@ python bot.py
 
 ```
 
-⚠️ Disclaimer
-This software is developed strictly for educational and research purposes. Algorithmic outputs do not constitute formal financial or investment advice.
-
-
-
 
 ⚠️ Disclaimer
 This software is developed strictly for educational and research purposes. Algorithmic outputs do not constitute formal financial or investment advice.
