@@ -8,7 +8,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified
 from analyzer import analyze_company, get_value_radar
-# Integrated the historical evaluation loop from the database architecture
+import prompts  # <--- Il nostro magazzino testi centralizzato
 from database import (
     init_db, 
     register_user, 
@@ -25,8 +25,6 @@ API_ID = os.environ.get("TELEGRAM_API_ID")
 API_HASH = os.environ.get("TELEGRAM_API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 LOCK_FILE = "scan.lock"
-
-# Official live production Telegram channel connection link
 CHANNEL_LINK = "https://t.me/valuelensinsidersignals" 
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
@@ -34,134 +32,70 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
 
 app = Client("valuelens_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Localization dictionary database matching user preference context mappings
-STRINGS = {
-    "en": {
-        "welcome": "📊 **Welcome to ValueLens Bot!**\n\nYour quantitative analyst for Global Stocks.\n⚡ **PRO features activated for FREE!**\n\nType /help to see all available commands and features.\n\n⚠️ *Disclaimer: Educational purposes only. Not financial advice.*",
-        "help": "📖 **ValueLens Bot | Command Reference**\n\n• /start - Initialize the bot and check registration.\n• /help - Show this interactive command guide.\n• /radar - Scan indices (e.g., S&P 500) for structural value anomalies.\n• /insider - View active real-time C-Suite corporate insider buying alerts.\n• /language - Change menu and analytical report output language.\n\n💡 **Direct Analysis:** Just type any stock ticker symbol (e.g., AAPL, MSFT) directly in chat to compile custom FLASH or PRO reports.",
-        "maintenance": "🤖 **ValueLens | Maintenance**\n\nRunning nightly market data updates. Back online in a few minutes!",
-        "radar_menu": "📡 **Value Radar**\nSelect a market index to scan for undervalued anomalies:",
-        "radar_scan_depth": "📡 **Index:** {index}\nSelect scanning depth:",
-        "radar_running": "📡 Scanning the **{index}** ({mode} mode)... Please wait.",
-        "lang_menu": "🌐 **Language Settings**\nSelect your preferred language for menus and intelligence reports:",
-        "lang_success": "✅ Language configuration updated to English!",
-        "ticker_prompt": "🤖 **Ticker recognized:** `{ticker}`\nSelect the analysis depth:",
-        "compiling_report": "🔍 Compiling {mode} report for **{ticker}**... Please wait.",
-        "insider_init": "🚀 **First-Time Initialization**\n\nThe global insider database is currently empty. Launching initial scan across top 1,000 US equities...\n\n⏱️ Takes approx. 2 minutes. Results will appear automatically!",
-        "insider_active": "🕵️‍♂️ **ValueLens INSIDER | Active US Signals**\nCompanies detected at structural lows backed by heavy C-Suite buying:\n\n",
-        "insider_footer": "\n💡 *Analyze these tickers individually by sending them in chat to view the updated Reverse DCF.*",
-        "insider_none": (
-            "🚨 **ValueLens INSIDER | No Signals Found**\n\n"
-            "Top 1,000 US companies scanned. Currently, **zero** entities match our high-conviction criteria "
-            "(Price near 52-week lows + Aggressive corporate executive buying within the last 6 months).\n\n"
-            "💡 **Verdict:** Market valuations are stretched; insiders are holding cash. Rescanning tonight.\n\n"
-            "📢 **Join our Telegram Channel:** [ValueLens Insider Signals](" + CHANNEL_LINK + ")\n"
-            "When high-conviction anomalies are discovered, they are instantly broadcasted there! "
-            "The channel also hosts our **Virtual Tracker Portfolio**, monitoring real-time performance and ROI "
-            "of all past insider alerts from their exact detection date."
-        )
-    },
-    "it": {
-        "welcome": "📊 **Benvenuto su ValueLens Bot!**\n\nIl tuo analista quantitativo personale per le azioni globali.\n⚡ **Funzionalità PRO attivate GRATIS!**\n\nDigita /help per visualizzare la guida ai comandi disponibili.\n\n⚠️ *Disclaimer: Solo a scopo didattico. Nessun consiglio finanziario.*",
-        "help": "📖 **ValueLens Bot | Guida ai Comandi**\n\n• /start - Inizializza il bot e verifica la registrazione.\n• /help - Mostra questa guida interattiva ai comandi.\n• /radar - Scansiona indici (es. S&P 500) alla ricerca di forti anomalie di valore.\n• /insider - Mostra gli acquisti recenti eseguiti dai C-Suite Insider aziendali.\n• /language - Modifica la lingua dei menu e dei report generati.\n\n💡 **Analisi Diretta:** Invia il codice ticker di un'azione (es. AAPL, MSFT) direttamente in chat per compilare report personalizzati in modalità FLASH o PRO.",
-        "maintenance": "🤖 **ValueLens | Manutenzione**\n\nAggiornamento dei dati di mercato notturno in corso. Di nuovo online tra pochissimi minuti!",
-        "radar_menu": "📡 **Value Radar**\nSeleziona un indice di mercato da scansionare alla ricerca di aziende a sconto:",
-        "radar_scan_depth": "📡 **Indice:** {index}\nSeleziona la profondità di scansione:",
-        "radar_running": "📡 Scansione dell'indice **{index}** (modalità {mode}) in corso... Attendere prego.",
-        "lang_menu": "🌐 **Impostazioni Lingua**\nSeleziona la tua lingua preferita per l'interfaccia e i report finanziari dell'IA:",
-        "lang_success": "✅ Configurazione della lingua aggiornata in Italiano!",
-        "ticker_prompt": "🤖 **Ticker riconosciuto:** `{ticker}`\nSeleziona la profondità dell'analisi:",
-        "compiling_report": "🔍 Compilazione del report {mode} per **{ticker}**... Attendere prego.",
-        "insider_init": "🚀 **Inizializzazione Sistema**\n\nIl database interno è vuoto. Lancio della scansione iniziale sulle top 1.000 azioni statunitensi...\n\n⏱️ Richiede circa 2 minuti. I risultati appariranno qui automaticamente!",
-        "insider_active": "🕵️‍♂️ **ValueLens INSIDER | Segnali US Attivi**\n Aziende rilevate ai minimi strutturali supportate da forti acquisti di manager interni:\n\n",
-        "insider_footer": "\n💡 *Analizza questi ticker individualmente inviandoli in chat per vedere il modello Reverse DCF aggiornato.*",
-        "insider_none": (
-            "🚨 **ValueLens INSIDER | Nessun Segnale Trovato**\n\n"
-            "Scansionate le top 1.000 aziende US. Attualmente, **zero** società rispettano i nostri criteri di alta convinzione "
-            "(Prezzo vicino ai minimi di 52 settimane + Acquisti aggressivi del management negli ultimi 6 mesi).\n\n"
-            "💡 **Verdetto:** Le valutazioni di mercato sono tese; gli insider preferiscono tenere liquidità.\n\n"
-            "📢 **Unisciti al nostro Canale Telegram:** [ValueLens Insider Signals](" + CHANNEL_LINK + ")\n"
-            "Non appena vengono rilevate anomalie ad alta convinzione, vengono pubblicate istantaneamente lì! "
-            "The canal ospita anche il nostro **Virtual Tracker Portfolio**, che monitora le performance reali e il ROI "
-            "di tutti i segnali passati dalla loro esatta data di rilevamento."
-        )
-    }
-}
-
 def is_bot_locked() -> bool:
-    """Checks if the background scanner is currently updating the database."""
     return os.path.exists(LOCK_FILE)
 
 def placeholder_insider_scanner():
-    """Simulates the 1,000 company network scan operations on first boot."""
     import time
     time.sleep(120) 
 
 async def background_scheduler(client: Client):
-    """
-    Independent asynchronous background worker loop.
-    Periodically executes background metrics validation and system routines.
-    """
     import logging
     scheduler_logger = logging.getLogger("ValueLensScheduler")
     scheduler_logger.info("Persistent background engine execution thread started.")
-    
     while True:
         try:
-            # Offloads the blocking SQLite evaluation to a safe separate execution thread
-            scheduler_logger.info("Executing scheduled accuracy validation loops across historical predictions...")
+            scheduler_logger.info("Executing scheduled accuracy validation loops...")
             await asyncio.to_thread(evaluate_historical_accuracy_loop)
         except Exception as e:
             scheduler_logger.error(f"Error caught during background scheduler execution: {e}")
-        
-        # Check tracking states precisely every hour (3600 seconds)
         await asyncio.sleep(3600)
+
+# --- MIDDLEWARE UTILITY ---
+def get_ui_text(user_id: int, key: str) -> str:
+    """Helper to safely fetch localized strings with dynamic fallback."""
+    lang = get_user_language(user_id)
+    return prompts.UI_STRINGS.get(lang, prompts.UI_STRINGS["en"]).get(key, "")
 
 @app.on_message(filters.command("start") & filters.private)
 async def send_welcome(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
-    await message.reply_text(STRINGS[lang]["welcome"], parse_mode=enums.ParseMode.MARKDOWN)
+    register_user(uid, message.from_user.username or "Anonymous")
+    await message.reply_text(get_ui_text(uid, "welcome"), parse_mode=enums.ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("help") & filters.private)
 async def send_help(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
-    await message.reply_text(STRINGS[lang]["help"], parse_mode=enums.ParseMode.MARKDOWN)
+    register_user(uid, message.from_user.username or "Anonymous")
+    await message.reply_text(get_ui_text(uid, "help"), parse_mode=enums.ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("language") & filters.private)
 async def change_language_menu(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
+    register_user(uid, message.from_user.username or "Anonymous")
     
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🇬🇧 English", callback_data="set_lang:en"),
-            InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_lang:it")
-        ]
+        [InlineKeyboardButton("🇬🇧 English", callback_data="set_lang:en"),
+         InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_lang:it")]
     ])
-    await message.reply_text(STRINGS[lang]["lang_menu"], reply_markup=keyboard)
+    await message.reply_text(get_ui_text(uid, "lang_menu"), reply_markup=keyboard)
 
 @app.on_message(filters.command("radar") & filters.private)
 async def value_radar_menu(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
+    register_user(uid, message.from_user.username or "Anonymous")
     
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🇺🇸 S&P 500", callback_data="radar_idx:S&P 500")],
@@ -170,16 +104,15 @@ async def value_radar_menu(client: Client, message: Message):
         [InlineKeyboardButton("🏭 Dow Jones", callback_data="radar_idx:Dow Jones")],
         [InlineKeyboardButton("🔬 Russell 2000", callback_data="radar_idx:Russell 2000")]
     ])
-    await message.reply_text(STRINGS[lang]["radar_menu"], reply_markup=keyboard)
+    await message.reply_text(get_ui_text(uid, "radar_menu"), reply_markup=keyboard)
 
 @app.on_message(filters.command("insider") & filters.private)
 async def view_insider_signals(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
+    register_user(uid, message.from_user.username or "Anonymous")
     
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -187,7 +120,7 @@ async def view_insider_signals(client: Client, message: Message):
     last_scan_status = cursor.fetchone()[0]
     
     if last_scan_status == "NEVER":
-        status_msg = await message.reply_text(STRINGS[lang]["insider_init"], parse_mode=enums.ParseMode.MARKDOWN)
+        status_msg = await message.reply_text(get_ui_text(uid, "insider_init"), parse_mode=enums.ParseMode.MARKDOWN)
         with open(LOCK_FILE, "w") as lock:
             lock.write("locked")
         try:
@@ -198,7 +131,7 @@ async def view_insider_signals(client: Client, message: Message):
         except Exception as e:
             if os.path.exists(LOCK_FILE):
                 os.remove(LOCK_FILE)
-            await status_msg.edit_text(f"❌ **Initialization Error:** {str(e)}")
+            await status_msg.edit_text(get_ui_text(uid, "system_error").format(error=str(e)))
             conn.close()
             return
         finally:
@@ -210,14 +143,14 @@ async def view_insider_signals(client: Client, message: Message):
         conn.close()
         
         if not rows:
-            await status_msg.edit_text(STRINGS[lang]["insider_none"], parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
+            await status_msg.edit_text(get_ui_text(uid, "insider_none").format(channel_link=CHANNEL_LINK), parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
             return
         else:
-            response_text = STRINGS[lang]["insider_active"]
+            response_text = get_ui_text(uid, "insider_active")
             for row in rows:
                 ticker, date, price = row
                 response_text += f"• **{ticker}**\n  ↳ Detected: {date}\n  ↳ Entry: ${price:.2f}\n\n"
-            response_text += STRINGS[lang]["insider_footer"]
+            response_text += get_ui_text(uid, "insider_footer")
             await status_msg.edit_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
             return
 
@@ -226,56 +159,51 @@ async def view_insider_signals(client: Client, message: Message):
     conn.close()
 
     if not rows:
-        await message.reply_text(STRINGS[lang]["insider_none"], parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
+        await message.reply_text(get_ui_text(uid, "insider_none").format(channel_link=CHANNEL_LINK), parse_mode=enums.ParseMode.MARKDOWN, disable_web_page_preview=True)
         return
 
-    response_text = STRINGS[lang]["insider_active"]
+    response_text = get_ui_text(uid, "insider_active")
     for row in rows:
         ticker, date, price = row
         response_text += f"• **{ticker}**\n  ↳ Detected: {date}\n  ↳ Entry: ${price:.2f}\n\n"
-    response_text += STRINGS[lang]["insider_footer"]
+    response_text += get_ui_text(uid, "insider_footer")
     await message.reply_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
 
 @app.on_message(filters.text & filters.private & ~filters.command(["start", "help", "radar", "insider", "language"]))
 async def prompt_analysis_mode(client: Client, message: Message):
+    uid = message.from_user.id
     if is_bot_locked():
-        lang = get_user_language(message.from_user.id)
-        await message.reply_text(STRINGS[lang]["maintenance"])
+        await message.reply_text(get_ui_text(uid, "maintenance"))
         return
-    register_user(message.from_user.id, message.from_user.username or "Anonymous")
-    lang = get_user_language(message.from_user.id)
+    register_user(uid, message.from_user.username or "Anonymous")
     
     ticker = message.text.strip().upper()
     if not re.match(r"^[A-Z0-9-]{1,8}$", ticker):
-        await message.reply_text("❌ Invalid ticker format." if lang == "en" else "❌ Formato ticker non valido.")
+        await message.reply_text(get_ui_text(uid, "invalid_ticker"))
         return
 
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("⚡️ FLASH", callback_data=f"analyze:FLASH:{ticker}"),
-            InlineKeyboardButton("🔍 PRO", callback_data=f"analyze:PRO:{ticker}")
-        ]
+        [InlineKeyboardButton("⚡️ FLASH", callback_data=f"analyze:FLASH:{ticker}"),
+         InlineKeyboardButton("🔍 PRO", callback_data=f"analyze:PRO:{ticker}")]
     ])
-    await message.reply_text(STRINGS[lang]["ticker_prompt"].format(ticker=ticker), reply_markup=keyboard)
-
+    await message.reply_text(get_ui_text(uid, "ticker_prompt").format(ticker=ticker), reply_markup=keyboard)
 
 @app.on_callback_query()
 async def handle_callbacks(client: Client, callback_query: CallbackQuery):
-    user_id = callback_query.from_user.id
+    uid = callback_query.from_user.id
     data = callback_query.data
-    lang = get_user_language(user_id)
+    lang = get_user_language(uid)
     
     if is_bot_locked():
-        alert_msg = "System updating..." if lang == "en" else "Aggiornamento sistema in corso..."
-        await callback_query.answer(alert_msg, show_alert=True)
+        await callback_query.answer(get_ui_text(uid, "system_updating"), show_alert=True)
         return
     
     if data.startswith("set_lang:"):
         _, selected_lang = data.split(":")
-        set_user_language(user_id, selected_lang)
+        set_user_language(uid, selected_lang)
         await callback_query.answer()
         try:
-            await callback_query.message.edit_text(STRINGS[selected_lang]["lang_success"])
+            await callback_query.message.edit_text(prompts.UI_STRINGS[selected_lang]["lang_success"])
         except MessageNotModified:
             pass
 
@@ -283,38 +211,35 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         _, mode, ticker = data.split(":")
         await callback_query.answer()
         try:
-            await callback_query.message.edit_text(STRINGS[lang]["compiling_report"].format(mode=mode, ticker=ticker))
+            await callback_query.message.edit_text(get_ui_text(uid, "compiling_report").format(mode=mode, ticker=ticker))
         except MessageNotModified:
             pass
             
         try:
             analysis_result = analyze_company(ticker, mode, lang)
-            increment_scan_count(user_id)
+            increment_scan_count(uid)
             await callback_query.message.edit_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
         except MessageNotModified:
             pass
         except Exception as e:
-            await callback_query.message.edit_text(f"❌ System error: {str(e)}")
+            await callback_query.message.edit_text(get_ui_text(uid, "system_error").format(error=str(e)))
 
     elif data.startswith("radar_idx:"):
         _, index_name = data.split(":")
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("⚡️ FLASH", callback_data=f"radar_run:FLASH:{index_name}"),
-                InlineKeyboardButton("🔍 PRO", callback_data=f"radar_run:PRO:{index_name}")
-            ]
+            [InlineKeyboardButton("⚡️ FLASH", callback_data=f"radar_run:FLASH:{index_name}"),
+             InlineKeyboardButton("🔍 PRO", callback_data=f"radar_run:PRO:{index_name}")]
         ])
         try:
-            await callback_query.message.edit_text(STRINGS[lang]["radar_scan_depth"].format(index=index_name), reply_markup=keyboard)
+            await callback_query.message.edit_text(get_ui_text(uid, "radar_scan_depth").format(index=index_name), reply_markup=keyboard)
         except MessageNotModified:
             pass
 
     elif data.startswith("radar_run:"):
         _, mode, index_name = data.split(":")
         await callback_query.answer()
-        
         try:
-            await callback_query.message.edit_text(STRINGS[lang]["radar_running"].format(index=index_name, mode=mode))
+            await callback_query.message.edit_text(get_ui_text(uid, "radar_running").format(index=index_name, mode=mode))
         except MessageNotModified:
             pass
             
@@ -324,22 +249,13 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         except MessageNotModified:
             pass
         except Exception as e:
-            await callback_query.message.edit_text(f"❌ Radar error: {str(e)}")
-
+            await callback_query.message.edit_text(get_ui_text(uid, "radar_error").format(error=str(e)))
 
 if __name__ == "__main__":
     from pyrogram import idle
-    
-    # 1. Structural DB Setup
     init_db()
     print("ValueLens Telegram Bot UI is running...")
-    
-    # 2. Start the Client Instance
     app.start()
-    
-    # 3. Inject the worker loop safely into Pyrogram's running asynchronous frame
     asyncio.get_event_loop().create_task(background_scheduler(app))
-    
-    # 4. Keep running until an external interrupt (Ctrl+C / Kill signal) is received
     idle()
     app.stop()

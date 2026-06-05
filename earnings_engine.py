@@ -5,14 +5,15 @@ from datetime import datetime, timedelta
 import yfinance as yf
 from pyrogram import Client
 
-# Import core persistence hooks from your updated database module
+# Import core persistence hooks and centralized prompts
+import prompts
 from database import save_earnings_prediction, get_accuracy_metrics
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ValueLensChannelEngine")
 
-# Target Telegram Channel Unique Numerical ID (Extracted from your JSON logs)
+# Target Telegram Channel Unique Numerical ID
 CHANNEL_CHAT_ID = -1003736154451
 
 def get_upcoming_week_dates():
@@ -73,14 +74,18 @@ async def post_weekly_dossier_to_channel(client: Client, filtered_events):
     if not filtered_events:
         return
 
-    message = "📋 **VALUELENS | WEEKLY EARNINGS DOSSIER** 📋\n"
-    message += "*Institutional High-Cap Catalysts Monitored This Week:*\n\n"
+    # Construct message using the centralized prompts engine
+    message = prompts.CHANNEL_STRINGS["weekly_header"]
     
     for item in filtered_events:
-        message += f"• **{item['ticker']}** ({item['company_name']})\n"
-        message += f"  📅 Date: `{item['date']}` | Cap: ${item['market_cap_billions']}B\n\n"
+        message += prompts.CHANNEL_STRINGS["weekly_item"].format(
+            ticker=item['ticker'],
+            company_name=item['company_name'],
+            date=item['date'],
+            market_cap_billions=item['market_cap_billions']
+        )
         
-    message += "📡 *Sniper alerts with full DeepSeek AI Sentiment and Option Skew scores will broadcast 24 hours prior to execution windows.*"
+    message += prompts.CHANNEL_STRINGS["weekly_footer"]
     
     await client.send_message(chat_id=CHANNEL_CHAT_ID, text=message)
     logger.info("Weekly Earnings Dossier successfully transmitted to official channel logs.")
@@ -128,7 +133,7 @@ async def analyze_and_post_sniper_alert(client: Client, ticker, company_name):
     options_modifier = await compute_advanced_options_skew(stock)
     
     # 3. AI Sentiment Layer Placeholder (Derived via core deepseek module)
-    ai_sentiment_score = 35 # Example output from DeepSeek token analysis mapping
+    ai_sentiment_score = 35 
     
     # Final Score Blend Consolidation
     final_ees = round(quant_score + options_modifier + ai_sentiment_score)
@@ -145,17 +150,25 @@ async def analyze_and_post_sniper_alert(client: Client, ticker, company_name):
     # Read the current track record dynamically from SQLite metadata
     _, _, accuracy_str = get_accuracy_metrics()
 
-    # Construct clean UI framework
-    verdict = "🟢 Strong Upside Surprise Potential" if final_ees >= 30 else "🔴 High Downside Risk Vector" if final_ees <= -30 else "🟡 Neutral Operational Horizon"
+    # Extract textual verdict from centralized prompts
+    if final_ees >= 30:
+        verdict = prompts.CHANNEL_STRINGS["verdicts"]["bullish"]
+    elif final_ees <= -30:
+        verdict = prompts.CHANNEL_STRINGS["verdicts"]["bearish"]
+    else:
+        verdict = prompts.CHANNEL_STRINGS["verdicts"]["neutral"]
     
-    msg = f"🎯 **VALUELENS SNIPER ALERT | {ticker}** 🎯\n"
-    msg += f"🏢 **Company:** {company_name}\n"
-    msg += f"📊 **Earnings Edge Score:** `{final_ees} / 100`\n"
-    msg += f"⚖️ **Strategic Verdict:** {verdict}\n\n"
-    msg += f"• *Quant Alignment:* Analysts targets show {round(quant_score)} pts baseline factor.\n"
-    msg += f"• *Smart Money Flow:* Options chain volume delta added {options_modifier} pts tracking.\n"
-    msg += f"• *DeepSeek Intelligence:* Financial catalyst extraction rating at {ai_sentiment_score} pts.\n\n"
-    msg += f"🤖 **ValueLens Historical Track Record Accuracy:** `{accuracy_str}`\n"
+    # Final alert formatting via centralized dictionary
+    msg = prompts.CHANNEL_STRINGS["sniper_alert"].format(
+        ticker=ticker,
+        company_name=company_name,
+        final_ees=final_ees,
+        verdict=verdict,
+        quant_score=round(quant_score),
+        options_modifier=options_modifier,
+        ai_sentiment_score=ai_sentiment_score,
+        accuracy_str=accuracy_str
+    )
     
     await client.send_message(chat_id=CHANNEL_CHAT_ID, text=msg)
     logger.info(f"Sniper deployment sequence executed for target asset: {ticker}")
