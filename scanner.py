@@ -1,89 +1,106 @@
 import os
-import sys
-import sqlite3
+import time
 import logging
-from datetime import datetime
+import datetime
+import requests
+import pandas as pd
 import yfinance as yf
-from database import (
-    DB_NAME, 
-    has_recent_active_signal, 
-    add_insider_signal, 
-    get_signals_to_track, 
-    update_signal_metrics
-)
+from analyzer import analyze_company, get_value_radar
 
-LOCK_FILE = "scan.lock"
-
-# Configure advanced structured logging architecture
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ValueLensScanner")
 
-def run_nightly_screener():
-    logger.info("Starting nightly corporate insider scanning sequence...")
-    
-    # Create the synchronization lock file to prevent race conditions with the bot context
-    with open(LOCK_FILE, "w") as f:
-        f.write("locked")
-        
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
+
+def get_us_market_universe():
+    """Fetches and deduplicates S&P 500 and NASDAQ 100 tickers using Wikipedia."""
     try:
-        # --- PHASE 1 & 2: INDEX SCREENING & INSIDER FILTERING ---
-        # Mocking data payload from financial APIs (Replace with your actual scraping/API core)
-        discovered_tickers = [("INTC", 30.15), ("PFE", 28.40)] 
+        sp500_table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+        sp500_tickers = sp500_table['Symbol'].tolist()
         
-        for ticker, price in discovered_tickers:
-            try:
-                # Apply the 90-day protection shield filter to avoid duplicate user alerts
-                if not has_recent_active_signal(ticker):
-                    add_insider_signal(ticker, price)
-                    logger.info(f"New high-conviction insider signal stored: {ticker} at ${price}")
-                else:
-                    logger.info(f"Signal for {ticker} skipped: protection shield active (within 90 days).")
-            except Exception as ticker_err:
-                logger.error(f"Failed processing insider screening loop for asset {ticker}: {ticker_err}")
-
-        # --- PHASE 3: PORTFOLIO ROI CALCULATIONS (Virtual Tracker) ---
-        logger.info("Recalculating real-time performance metrics for active tracker portfolio...")
-        try:
-            signals_to_update = get_signals_to_track()
-            for row in signals_to_update:
-                # Safe index-based unpacking to accommodate custom structural DB changes
-                signal_id = row[0]
-                ticker = row[1]
-                price_detected = row[3]
-                
-                try:
-                    stock = yf.Ticker(ticker)
-                    current_price = stock.info.get("currentPrice")
-                    
-                    if current_price is not None and price_detected > 0:
-                        # Calculate current absolute ROI percentage from initial C-Suite execution window
-                        current_roi = round(((current_price - price_detected) / price_detected) * 100, 2)
-                        
-                        # Execute the database tracking persistence layer update
-                        update_signal_metrics(signal_id, current_roi)
-                        logger.info(f"Updated tracking statistics for {ticker}: ROI currently at {current_roi}%")
-                except Exception as tracking_err:
-                    logger.error(f"Failed pulling market price data for portfolio tracking entity {ticker}: {tracking_err}")
-        except Exception as batch_err:
-            logger.error(f"Failed executing structural tracker portfolio calculation batch: {batch_err}")
-
-        # --- PHASE 4: UPDATE RUNTIME METADATA ---
-        # Signals the main bot interface that metadata states are initialized and updated
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("UPDATE metadata SET value = ? WHERE key = 'last_insider_scan'", (now_str,))
-        conn.commit()
-        conn.close()
-        
-        logger.info("Nightly corporate insider scan completed successfully.")
-
+        nasdaq_table = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[4]
+        nasdaq_tickers = nasdaq_table['Ticker'].tolist()
     except Exception as e:
-        logger.error(f"CRITICAL CRASH detected within nightly screener sequence: {str(e)}")
-    finally:
-        # Crucial safety cleanup step to guarantee the core system is never left frozen permanently
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
+        logger.error(f"Failed to fetch dynamic ticker lists: {e}")
+        return [], []
+    
+    sp500_clean = [t.replace('.', '-') for t in sp500_tickers]
+    nasdaq_clean = [t.replace('.', '-') for t in nasdaq_tickers]
+    
+    nasdaq_unique = [t for t in nasdaq_clean if t not in sp500_clean]
+    return sp500_clean, nasdaq_unique
 
-if __name__ == "__main__":
-    run_nightly_screener()
+def fast_value_screen(tickers_list, max_candidates=15):
+    """Screens tickers quickly using lightweight fast_info property."""
+    candidates = []
+    
+    for ticker in tickers_list:
+        try:
+            stock = yf.Ticker(ticker)
+            f_info = stock.fast_info
+            
+            high = f_info.get('yearHigh', None)
+            current = f_info.get('last_price', None)
+            market_cap = f_info.get('marketCap', 0)
+            
+            if high and current and market_cap > 2000000000:
+                discount = (high - current) / high
+                candidates.append({
+                    "ticker": ticker,
+                    "discount": discount,
+                    "market_cap": market_cap
+                })
+        except Exception as e:
+            logger.warning(f"Skipping fast scan for {ticker}: {e}")
+            
+        time.sleep(3)
+        
+    candidates.sort(key=lambda x: x['discount'], reverse=True)
+    return [c['ticker'] for c in candidates[:max_candidates]]
+
+def broadcast_to_channel(text):
+    """Sends compiled text payload to the designated Telegram channel."""
+    if not BOT_TOKEN or not CHANNEL_ID:
+        logger.error("Telegram environment variables missing.")
+        return
+    
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload, timeout=15)
+    except Exception as e:
+        logger.error(f"Failed broadcasting report update: {e}")
+
+def execute_nightly_routine():
+    """Orchestrates the entire multi-stage quantitative funnel and AI analysis."""
+    logger.info("Executing standard market analysis routine.")
+    
+    sp500, nasdaq_unique = get_us_market_universe()
+    if not sp500:
+        return
+    
+    # Phase 1: S&P 500 Fast Scan
+    sp500_top_candidates = fast_value_screen(sp500, max_candidates=15)
+    
+    # Phase 2: NASDAQ Unique Fast Scan
+    nasdaq_top_candidates = fast_value_screen(nasdaq_unique, max_candidates=5)
+    
+    total_candidates = sp500_top_candidates + nasdaq_top_candidates
+    logger.info(f"Funnel complete. Selected targets for deep analysis: {total_candidates}")
+    
+    compiled_reports = ["🌅 *ValueLens Morning Market Intelligence Report*\n\n"]
+    
+    for ticker in total_candidates:
+        try:
+            report = analyze_company(ticker, mode="FLASH", lang="it")
+            compiled_reports.append(f"### Analysis for {ticker}\n{report}\n\n---\n\n")
+            time.sleep(15)
+        except Exception as e:
+            logger.error(f"Failed fetching comprehensive analysis for target {ticker}: {e}")
+            
+    final_payload = "".join(compiled_reports)
+    broadcast_to_channel(final_payload)

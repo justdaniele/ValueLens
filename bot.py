@@ -2,13 +2,15 @@ import os
 import re
 import sqlite3
 import asyncio
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
+from scanner import execute_nightly_routine
 from dotenv import load_dotenv
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified
 from analyzer import analyze_company, get_value_radar
-import prompts  # <--- Il nostro magazzino testi centralizzato
+import prompts  
 from database import (
     init_db, 
     register_user, 
@@ -31,6 +33,7 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("Missing Telegram environment variables in .env")
 
 app = Client("valuelens_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+logger = logging.getLogger("ValueLensBot")
 
 def is_bot_locked() -> bool:
     return os.path.exists(LOCK_FILE)
@@ -39,19 +42,43 @@ def placeholder_insider_scanner():
     import time
     time.sleep(120) 
 
+async def wait_until(hour: int, minute: int):
+    """Sleeps until the specified absolute hour and minute."""
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    if target <= now:
+        target += timedelta(days=1)
+        
+    sleep_seconds = (target - now).total_seconds()
+    await asyncio.sleep(sleep_seconds)
+
 async def background_scheduler(client: Client):
-    import logging
     scheduler_logger = logging.getLogger("ValueLensScheduler")
     scheduler_logger.info("Persistent background engine execution thread started.")
+    
+    try:
+        scheduler_logger.info("Executing immediate startup historical accuracy validation...")
+        await asyncio.to_thread(evaluate_historical_accuracy_loop)
+    except Exception as e:
+        scheduler_logger.error(f"Initial accuracy check failed: {e}")
+
     while True:
         try:
-            scheduler_logger.info("Executing scheduled accuracy validation loops...")
+            scheduler_logger.info("Scheduler entering deep sleep until 02:00 AM.")
+            await wait_until(2, 0)
+            
+            scheduler_logger.info("Clock struck 02:00 AM. Launching nightly quantitative funnel...")
+            await asyncio.to_thread(execute_nightly_routine)
+            
+            scheduler_logger.info("Nightly routine complete. Triggering daily historical accuracy validation...")
             await asyncio.to_thread(evaluate_historical_accuracy_loop)
+            
         except Exception as e:
-            scheduler_logger.error(f"Error caught during background scheduler execution: {e}")
-        await asyncio.sleep(3600)
+            scheduler_logger.error(f"Error detected in scheduler task execution: {e}")
+            await asyncio.sleep(60)
 
-# --- MIDDLEWARE UTILITY ---
+# --- MIDDLEWARE UTILITIES ---
 def get_ui_text(user_id: int, key: str) -> str:
     """Helper to safely fetch localized strings with dynamic fallback."""
     lang = get_user_language(user_id)
@@ -218,7 +245,7 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         try:
             analysis_result = analyze_company(ticker, mode, lang)
             increment_scan_count(uid)
-            # Rimosso parse_mode=enums.ParseMode.MARKDOWN per evitare conflitti con i tag
+            # Stripped parse_mode to avoid tag structural conflicts
             await callback_query.message.edit_text(analysis_result)
         except MessageNotModified:
             pass
@@ -246,7 +273,7 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
             
         try:
             radar_result = get_value_radar(index_name, mode, lang)
-            # Rimosso parse_mode=enums.ParseMode.MARKDOWN anche qui per stabilizzare il Radar
+            # Stripped parse_mode to avoid tag structural conflicts
             await callback_query.message.edit_text(radar_result)
         except MessageNotModified:
             pass
