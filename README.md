@@ -17,7 +17,7 @@ A lightweight, high-performance Telegram bot powered by **Pyrogram** and **DeepS
 
 ### 1. Installation
 ```bash
-git clone [https://github.com/yourusername/valuelens-bot.git](https://github.com/justdaniele/valuelens-bot.git)
+git clone [https://github.com/justdaniele/valuelens-bot.git](https://github.com/justdaniele/valuelens-bot.git)
 cd valuelens-bot
 pip install pyrogram tgcrypto yfinance openai python-dotenv
 ```
