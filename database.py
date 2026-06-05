@@ -9,29 +9,11 @@ logger = logging.getLogger("ValueLensDatabase")
 DB_NAME = "valuelens.db"
 
 def init_db():
-    """Initializes the SQLite database and handles structural schema evolution safely."""
+    """Initializes the SQLite database and structures the autonomous operational schema."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Users table creation
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            scan_count INTEGER DEFAULT 0,
-            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Safe schema migration: Add language column to users table if it doesn't exist
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'")
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Column already exists, swallow the database operational error safely
-        pass
-
-    # Metadata configuration table
+    # Metadata configuration table (Global System Trackers)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
@@ -47,6 +29,17 @@ def init_db():
             date_detected TEXT,
             price_detected REAL,
             status TEXT DEFAULT 'ACTIVE'
+        )
+    """)
+    
+    # Nightly raw market reports persistence storage
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS nightly_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date_generated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ticker TEXT,
+            report_text TEXT,
+            status TEXT DEFAULT 'PENDING'
         )
     """)
     
@@ -68,51 +61,13 @@ def init_db():
     
     conn.commit()
     conn.close()
-    logger.info("Database schemas initialized and fully synchronized.")
+    logger.info("Database schemas fully initialized, migrated, and synchronized.")
 
-# --- User Management Functions ---
-
-def register_user(user_id: int, username: str):
-    """Registers a new user context or refreshes the username signature."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO users (user_id, username) 
-        VALUES (?, ?) 
-        ON CONFLICT(user_id) DO UPDATE SET username = excluded.username
-    """, (user_id, username))
-    conn.commit()
-    conn.close()
-
-def get_user_language(user_id: int) -> str:
-    """Retrieves the localized ISO language profile for a target user ID."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if (row and row[0]) else "en"
-
-def set_user_language(user_id: int, lang: str):
-    """Updates the user session runtime language preference profile."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
-    conn.commit()
-    conn.close()
-
-def increment_scan_count(user_id: int):
-    """Increments the analytical runtime counter metrics per unique profile."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET scan_count = scan_count + 1 WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
 
 # --- Persistent Earnings & Accuracy Tracking Functions ---
 
 def get_accuracy_metrics() -> tuple:
-    """Reads current quantitative win/loss statistics from the metadata table."""
+    """Reads current quantitative win/loss statistics from the metadata layer."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -124,8 +79,9 @@ def get_accuracy_metrics() -> tuple:
     
     conn.close()
     
-    accuracy_percentage = (wins / total * 100) if total > 0 else 75.0  # Dynamic default threshold
+    accuracy_percentage = (wins / total * 100) if total > 0 else 0.0
     return wins, total, f"{round(accuracy_percentage, 1)}%"
+
 
 def save_earnings_prediction(ticker: str, current_price: float, direction: str):
     """Stores a pending corporate catalyst prediction safely to disk storage."""
@@ -137,6 +93,7 @@ def save_earnings_prediction(ticker: str, current_price: float, direction: str):
     """, (ticker, current_price, direction, datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
 
 def evaluate_historical_accuracy_loop():
     """Validates older predictions against current spot closes to update global tracking statistics."""
@@ -154,21 +111,22 @@ def evaluate_historical_accuracy_loop():
         if datetime.now() - timestamp > timedelta(days=2):
             try:
                 stock = yf.Ticker(ticker)
-                current_close = stock.info.get("currentPrice")
+                # Attempt to get standard price points safely
+                current_close = stock.info.get("currentPrice") or stock.info.get("regularMarketPrice")
                 
                 if pred != "NEUTRAL" and current_close is not None:
                     is_successful_call = (pred == "BULLISH" and current_close > old_price) or (pred == "BEARISH" and current_close < old_price)
                     
-                    # Core Atomic Increment Step within the operational metadata layer
+                    # Atomic Increment Steps inside the metadata system
                     cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_total'")
                     if is_successful_call:
                         cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_wins'")
                 
-                # Turn on the structural closure flag to prevent duplicate processing
+                # Flag record as evaluated to filter it out from future checks
                 cursor.execute("UPDATE earnings_predictions SET is_evaluated = 1 WHERE ticker = ?", (ticker,))
-                logger.info(f"Historical evaluation record parsed for asset: {ticker}.")
+                logger.info(f"Historical verification successfully recorded for asset: {ticker}.")
             except Exception as e:
-                logger.error(f"Failed pulling real-time settlement price for ticker evaluation context {ticker}: {e}")
+                logger.error(f"Failed pulling real-time market settlement data for evaluation context {ticker}: {e}")
                 
     conn.commit()
     conn.close()
