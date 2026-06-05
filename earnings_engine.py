@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import yfinance as yf
 from analyzer import generate_earnings_sentiment_layer
 from database import save_earnings_prediction
+from scanner import get_us_market_universe
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] EarningsEngine: %(message)s")
@@ -15,13 +16,38 @@ logger = logging.getLogger("EarningsEngine")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID")
 
-# A default watchlist to monitor for earnings events
-WATCHLIST = [
-    "AAPL","MSFT","GOOGL","AMZN","TSLA","META","NVDA","JPM","V","JNJ","WMT","DIS","MA","UNH","HD"
-]
+def _fetch_earnings_from_yfinance(tickers, days_ahead):
+    """Scan a list of tickers for upcoming earnings using yfinance."""
+    upcoming = []
+    cutoff = datetime.now() + timedelta(days=days_ahead)
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            earn_ts = info.get("earningsTimestamp")
+            if earn_ts:
+                earn_date = datetime.fromtimestamp(earn_ts)
+                if earn_date <= cutoff:
+                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+                    continue
+            calendar = stock.calendar
+            if calendar and "Earnings Date" in calendar:
+                earn_value = calendar["Earnings Date"]
+                if isinstance(earn_value, str):
+                    earn_date = datetime.fromisoformat(earn_value)
+                elif isinstance(earn_value, datetime):
+                    earn_date = earn_value
+                else:
+                    continue
+                if earn_date <= cutoff:
+                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+        except Exception as e:
+            logger.warning(f"Could not fetch calendar for {ticker}: {e}")
+            continue
+    return upcoming
 
 def get_earnings_calendar(days_ahead=7):
-    """Fetches upcoming earnings using Financial Modeling Prep API or falls back to watchlist."""
+    """Fetches upcoming earnings using Financial Modeling Prep API or falls back to dynamic yfinance scan."""
     logger.info("Fetching earnings calendar...")
     fmp_api_key = os.environ.get("FMP_API_KEY", "")
     upcoming = []
@@ -43,40 +69,19 @@ def get_earnings_calendar(days_ahead=7):
                         upcoming.append({"ticker": ticker, "date": date})
                 logger.info(f"Fetched {len(upcoming)} upcoming earnings from FMP.")
         except Exception as e:
-            logger.warning(f"FMP API call failed: {e}. Falling back to watchlist approach.")
+            logger.warning(f"FMP API call failed: {e}. Falling back to yfinance approach.")
             upcoming = []
 
     if not upcoming:
-        # fallback to watchlist/yfinance approach (same as before)
-        cutoff = datetime.now() + timedelta(days=days_ahead)
-        for ticker in WATCHLIST:
-            try:
-                stock = yf.Ticker(ticker)
-                info = stock.info
-                earn_ts = info.get("earningsTimestamp")
-                if earn_ts:
-                    earn_date = datetime.fromtimestamp(earn_ts)
-                    if earn_date <= cutoff:
-                        upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
-                        continue
-                calendar = stock.calendar
-                if calendar and "Earnings Date" in calendar:
-                    earn_value = calendar["Earnings Date"]
-                    if isinstance(earn_value, str):
-                        earn_date = datetime.fromisoformat(earn_value)
-                    elif isinstance(earn_value, datetime):
-                        earn_date = earn_value
-                    else:
-                        continue
-                    if earn_date <= cutoff:
-                        upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
-            except Exception as e:
-                logger.warning(f"Could not fetch calendar for {ticker}: {e}")
-                continue
-
+        # Use dynamic universe from scanner
+        sp500, nasdaq_unique = get_us_market_universe()
+        all_tickers = sp500 + nasdaq_unique
+        logger.info(f"Scanning {len(all_tickers)} tickers for upcoming earnings via yfinance...")
+        upcoming = _fetch_earnings_from_yfinance(all_tickers, days_ahead)
         if not upcoming:
-            logger.info("No upcoming earnings found; using fallback entry.")
-            upcoming = [{"ticker": "TSLA", "date": "2026-06-10"}]
+            logger.info("No upcoming earnings found via yfinance either.")
+            # Return empty list instead of hardcoded fallback
+            return []
 
     logger.info(f"Found {len(upcoming)} upcoming earnings.")
     return upcoming
