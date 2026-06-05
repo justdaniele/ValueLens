@@ -158,6 +158,37 @@ def broadcast_to_channel(text):
             
     return success_all
 
+def morning_broadcast():
+    """Invia al canale il report mattutino basato sui report salvati durante la notte."""
+    logger.info("Morning broadcast triggered.")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    cursor.execute("""
+        SELECT ticker, report_text FROM nightly_reports
+        WHERE date(date_generated) = ? AND status = 'PENDING'
+    """, (today,))
+    rows = cursor.fetchall()
+    if not rows:
+        logger.info("No pending reports for today.")
+        conn.close()
+        return
+    # Invia header
+    header = "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Target altamente sottovalutati rilevati:</i>\n\n"
+    broadcast_to_channel(header)
+    for ticker, report_text in rows:
+        formatted = f"<b>[ {ticker} ]</b>\n\n{report_text}\n\n〰️〰️〰️\n"
+        success = broadcast_to_channel(formatted)
+        if success:
+            # Aggiorna status a 'SENT'
+            cursor.execute("UPDATE nightly_reports SET status = 'SENT' WHERE ticker = ? AND date(date_generated) = ?", (ticker, today))
+            logger.info(f"Morning report sent for {ticker}.")
+        else:
+            logger.warning(f"Failed to send morning report for {ticker}.")
+        time.sleep(2)
+    conn.commit()
+    conn.close()
+
 # ── LOGICA DATABASE (Salvataggio Report) ──────────────────────────────────────
 
 def save_report_to_db(ticker, report_text):
@@ -220,10 +251,8 @@ def execute_nightly_routine():
     estimated_minutes = round((len(VALUE_UNIVERSE) * 5 + len(fast_candidates) * 15) / 60, 1)
     logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates} (tempo stimato ~{estimated_minutes} min)")
     
-    # Fase 3: Analisi DeepSeek, Salvataggio DB e Invio Telegram
-    logger.info("Fase 3: Generazione Report AI e Broadcast...")
-    header = "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Target altamente sottovalutati rilevati:</i>\n\n"
-    broadcast_to_channel(header)
+    # Fase 3: Analisi DeepSeek e Salvataggio DB (nessun invio notturno)
+    logger.info("Fase 3: Generazione Report AI e Salvataggio...")
     
     for ticker in total_candidates:
         logger.info(f"Avvio analisi per {ticker}...")
@@ -234,16 +263,10 @@ def execute_nightly_routine():
             # Formattazione per il canale
             formatted_report = f"<b>[ {ticker} ]</b>\n\n{report}\n\n〰️〰️〰️\n"
             
-            # 1. Salva nel DB (Tolleranza ai guasti)
+            # Salva nel DB (Tolleranza ai guasti)
             save_report_to_db(ticker, formatted_report)
             
-            # 2. Invia singolarmente per evitare il limite dei 4096 caratteri
-            success = broadcast_to_channel(formatted_report)
-            
-            if success:
-                 logger.info(f"Report per {ticker} pubblicato con successo.")
-            else:
-                 logger.warning(f"Salvataggio effettuato, ma fallito invio Telegram per {ticker}.")
+            logger.info(f"Report per {ticker} salvato nel DB.")
             
             time.sleep(15) # Pausa tra chiamate AI/Yahoo
             

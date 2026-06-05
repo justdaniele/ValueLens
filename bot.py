@@ -5,7 +5,7 @@ import datetime
 from dotenv import load_dotenv
 
 # Import autonomous tasks and database persistence
-from scanner import execute_nightly_routine
+from scanner import execute_nightly_routine, morning_broadcast
 from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy_loop
 from earnings_engine import send_alert_to_channel
 
@@ -63,6 +63,12 @@ async def core_scheduler_loop():
             logger.info(msg)
             
             logger.info("✅ Nightly routine complete. Returning to time-monitoring mode.")
+            
+            # Morning report at 08:00
+            await wait_until(8, 0)
+            logger.info("⏰ [08:00 AM] Triggering Morning Broadcast...")
+            await asyncio.to_thread(morning_broadcast)
+            logger.info("Morning broadcast complete.")
             
         except Exception as e:
             logger.error(f"Critical error caught inside Master Scheduler loop: {e}")
