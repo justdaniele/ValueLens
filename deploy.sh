@@ -32,4 +32,3 @@ sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl start "$SERVICE_NAME"
 
 echo "✔ Service '$SERVICE_NAME' installed and started."
-EOF
