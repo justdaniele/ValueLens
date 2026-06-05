@@ -218,7 +218,8 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
         try:
             analysis_result = analyze_company(ticker, mode, lang)
             increment_scan_count(uid)
-            await callback_query.message.edit_text(analysis_result, parse_mode=enums.ParseMode.MARKDOWN)
+            # Rimosso parse_mode=enums.ParseMode.MARKDOWN per evitare conflitti con i tag
+            await callback_query.message.edit_text(analysis_result)
         except MessageNotModified:
             pass
         except Exception as e:
@@ -245,12 +246,14 @@ async def handle_callbacks(client: Client, callback_query: CallbackQuery):
             
         try:
             radar_result = get_value_radar(index_name, mode, lang)
-            await callback_query.message.edit_text(radar_result, parse_mode=enums.ParseMode.MARKDOWN)
+            # Rimosso parse_mode=enums.ParseMode.MARKDOWN anche qui per stabilizzare il Radar
+            await callback_query.message.edit_text(radar_result)
         except MessageNotModified:
             pass
         except Exception as e:
             await callback_query.message.edit_text(get_ui_text(uid, "radar_error").format(error=str(e)))
 
+            
 if __name__ == "__main__":
     from pyrogram import idle
     init_db()

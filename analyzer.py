@@ -73,9 +73,10 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
             ]
         )
         
-        # Sanitize output to force safe bold formatting and neutralize Telegram's underline glitch
+        # --- BLOCCO SANIFICAZIONE INTEGRATO E VALIDATO ---
         final_output = response.choices[0].message.content
         final_output = final_output.replace("__", "**")
+        final_output = final_output.replace("<u>", "").replace("</u>", "")
         
         return final_output
     except Exception as e:
@@ -104,9 +105,10 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
             ]
         )
         
-        # Sanitize output to force safe bold formatting and neutralize Telegram's underline glitch
+        # --- BLOCCO SANIFICAZIONE INTEGRATO E VALIDATO ---
         final_output = response.choices[0].message.content
         final_output = final_output.replace("__", "**")
+        final_output = final_output.replace("<u>", "").replace("</u>", "")
         
         return final_output
     except Exception as e:
