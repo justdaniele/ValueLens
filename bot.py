@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 # Import autonomous tasks and database persistence
 from scanner import execute_nightly_routine
-from database import init_db
+from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy_loop
+from earnings_engine import send_alert_to_channel
 
 load_dotenv()
 
@@ -52,6 +53,14 @@ async def core_scheduler_loop():
             
             # Execute market scanner inside a separate asynchronous thread to avoid blocking the main loop
             await asyncio.to_thread(execute_nightly_routine)
+            
+            # Evaluate historical prediction accuracy and broadcast metrics
+            logger.info("Evaluating historical accuracy...")
+            await asyncio.to_thread(evaluate_historical_accuracy_loop)
+            wins, total, pct = get_accuracy_metrics()
+            msg = f"📊 Accuracy Report: {wins}/{total} ({pct})"
+            send_alert_to_channel(msg)
+            logger.info(msg)
             
             logger.info("✅ Nightly routine complete. Returning to time-monitoring mode.")
             

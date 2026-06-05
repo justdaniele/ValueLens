@@ -14,6 +14,7 @@ __pycache__/
 *.session-journal
 
 # System Metadata Files
+*.log
 .DS_Store
 Thumbs.db
 .aider*

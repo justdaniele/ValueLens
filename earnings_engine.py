@@ -21,44 +21,62 @@ WATCHLIST = [
 ]
 
 def get_earnings_calendar(days_ahead=7):
-    """Fetches upcoming earnings for watchlist tickers within days_ahead."""
+    """Fetches upcoming earnings using Financial Modeling Prep API or falls back to watchlist."""
     logger.info("Fetching earnings calendar...")
-    cutoff = datetime.now() + timedelta(days=days_ahead)
+    fmp_api_key = os.environ.get("FMP_API_KEY", "")
     upcoming = []
 
-    for ticker in WATCHLIST:
+    if fmp_api_key:
         try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            # Try to get the next earnings timestamp from the info dictionary
-            earn_ts = info.get("earningsTimestamp")
-            if earn_ts:
-                earn_date = datetime.fromtimestamp(earn_ts)
-                if earn_date <= cutoff:
-                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
-                    continue
-
-            # Fallback using the calendar property
-            calendar = stock.calendar
-            if calendar and "Earnings Date" in calendar:
-                earn_value = calendar["Earnings Date"]
-                # calendar can return a string or a Datetime
-                if isinstance(earn_value, str):
-                    earn_date = datetime.fromisoformat(earn_value)
-                elif isinstance(earn_value, datetime):
-                    earn_date = earn_value
-                else:
-                    continue
-                if earn_date <= cutoff:
-                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+            start_date = datetime.now().strftime("%Y-%m-%d")
+            end_date = (datetime.now() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+            url = (f"https://financialmodelingprep.com/api/v3/earnings_calendar"
+                   f"?from={start_date}&to={end_date}&apikey={fmp_api_key}")
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list):
+                for item in data:
+                    ticker = item.get("symbol", "")
+                    date = item.get("date", "")
+                    if ticker and date:
+                        upcoming.append({"ticker": ticker, "date": date})
+                logger.info(f"Fetched {len(upcoming)} upcoming earnings from FMP.")
         except Exception as e:
-            logger.warning(f"Could not fetch calendar for {ticker}: {e}")
-            continue
+            logger.warning(f"FMP API call failed: {e}. Falling back to watchlist approach.")
+            upcoming = []
 
-    # If nothing found, return a fallback entry so the pipeline still has data
     if not upcoming:
-        logger.info("No upcoming earnings found in watchlist; using fallback entry.")
-        upcoming = [{"ticker": "TSLA", "date": "2026-06-10"}]
+        # fallback to watchlist/yfinance approach (same as before)
+        cutoff = datetime.now() + timedelta(days=days_ahead)
+        for ticker in WATCHLIST:
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                earn_ts = info.get("earningsTimestamp")
+                if earn_ts:
+                    earn_date = datetime.fromtimestamp(earn_ts)
+                    if earn_date <= cutoff:
+                        upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+                        continue
+                calendar = stock.calendar
+                if calendar and "Earnings Date" in calendar:
+                    earn_value = calendar["Earnings Date"]
+                    if isinstance(earn_value, str):
+                        earn_date = datetime.fromisoformat(earn_value)
+                    elif isinstance(earn_value, datetime):
+                        earn_date = earn_value
+                    else:
+                        continue
+                    if earn_date <= cutoff:
+                        upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+            except Exception as e:
+                logger.warning(f"Could not fetch calendar for {ticker}: {e}")
+                continue
+
+        if not upcoming:
+            logger.info("No upcoming earnings found; using fallback entry.")
+            upcoming = [{"ticker": "TSLA", "date": "2026-06-10"}]
 
     logger.info(f"Found {len(upcoming)} upcoming earnings.")
     return upcoming
