@@ -49,10 +49,11 @@ def get_us_market_universe():
 # ── VALUE UNIVERSE FILTER (da S&P 500) ────────────────────────────────────────
 
 def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
-                          pe_threshold=20, min_market_cap=10e9):
+                          pe_threshold=20):
     """
     Filtra i ticker S&P 500 per ottenere un universo value di ~150 ticker.
-    Usa fast_info per P/E e market cap.
+    Usa fast_info per P/E. Tutti i ticker S&P 500 hanno market cap > 22B,
+    quindi non serve filtrarli per capitalizzazione.
     """
     candidates = []
     for i, ticker in enumerate(tickers):
@@ -61,12 +62,10 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
         try:
             stock = yf.Ticker(ticker)
             f_info = stock.fast_info
-            market_cap = getattr(f_info, 'marketCap', 0)
             trailing_pe = getattr(f_info, 'trailingPE', None)
-            if market_cap > min_market_cap:
-                if trailing_pe is not None and trailing_pe > pe_threshold:
-                    continue
-                candidates.append(ticker)
+            if trailing_pe is not None and trailing_pe > pe_threshold:
+                continue
+            candidates.append(ticker)
         except Exception as e:
             logger.debug(f"Skip {ticker} during filter: {e}")
         time.sleep(sleep_seconds)
@@ -76,10 +75,10 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
 # ── FAST SCREEN (lightweight fast_info) ───────────────────────────────────────
 
 def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
-                      pe_threshold=20, min_market_cap=10e9):
+                      pe_threshold=20):
     """
     Pre‑filter using yfinance fast_info.
-    Skips tickers with trailing P/E above pe_threshold or market cap below min_market_cap.
+    Skips tickers with trailing P/E above pe_threshold.
     Returns the top max_candidates by discount from 52‑week high.
     """
     candidates = []
@@ -91,9 +90,8 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
             f_info = stock.fast_info
             high = getattr(f_info, 'yearHigh', None)
             current = getattr(f_info, 'lastPrice', None) or getattr(f_info, 'last_price', None)
-            market_cap = getattr(f_info, 'marketCap', 0)
             trailing_pe = getattr(f_info, 'trailingPE', None)
-            if high and current and market_cap > min_market_cap:
+            if high and current:
                 # Skip high‑P/E names (value screen)
                 if trailing_pe is not None and trailing_pe > pe_threshold:
                     continue
@@ -101,7 +99,6 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
                 candidates.append({
                     "ticker": ticker,
                     "discount": discount,
-                    "market_cap": market_cap,
                     "trailing_pe": trailing_pe
                 })
         except Exception as e:
