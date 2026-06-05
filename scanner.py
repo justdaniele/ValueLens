@@ -59,7 +59,7 @@ def get_us_market_universe():
     logger.info(f"Trovati {len(sp500_clean)} ticker S&P 500 e {len(nasdaq_unique)} ticker unici NASDAQ 100.")
     return sp500_clean, nasdaq_unique
 
-def fast_value_screen(tickers_list, max_candidates=15):
+def fast_value_screen(tickers_list, max_candidates=15, sleep_seconds=3):
     """Filtra velocemente i ticker basandosi sullo sconto rispetto ai massimi annuali."""
     candidates = []
     
@@ -86,7 +86,7 @@ def fast_value_screen(tickers_list, max_candidates=15):
         except Exception as e:
              logger.debug(f"Skip {ticker}: dati incompleti o errore ({e})")
             
-        time.sleep(1) # Riduciamo lo sleep a 1s per velocizzare la fast_info
+        time.sleep(sleep_seconds)
         
     candidates.sort(key=lambda x: x['discount'], reverse=True)
     top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
@@ -172,14 +172,15 @@ def execute_nightly_routine():
          logger.error("Impossibile procedere senza le liste ticker.")
          return
     
-    logger.info("Fase 1: Scansione Rapida S&P 500...")
-    sp500_top = fast_value_screen(sp500, max_candidates=15)
+    logger.info("Fase 1: Scansione Rapida S&P 500 (sleep 3s)...")
+    sp500_top = fast_value_screen(sp500, max_candidates=15, sleep_seconds=3)
     
-    logger.info("Fase 2: Scansione Rapida NASDAQ (Unici)...")
-    nasdaq_top = fast_value_screen(nasdaq_unique, max_candidates=5)
+    logger.info("Fase 2: Scansione Rapida NASDAQ (Unici) (sleep 3s)...")
+    nasdaq_top = fast_value_screen(nasdaq_unique, max_candidates=5, sleep_seconds=3)
     
     total_candidates = sp500_top + nasdaq_top
-    logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates}")
+    estimated_minutes = round((len(sp500) * 3 + len(nasdaq_unique) * 3) / 60, 1)
+    logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates} (tempo stimato ~{estimated_minutes} min)")
     
     if not total_candidates:
          logger.info("Nessun candidato trovato stasera.")
