@@ -71,9 +71,9 @@ def fast_value_screen(tickers_list, max_candidates=15):
             stock = yf.Ticker(ticker)
             f_info = stock.fast_info
             
-            high = f_info.get('yearHigh', None)
-            current = f_info.get('lastPrice', f_info.get('last_price', None)) # yfinance usa 'lastPrice' o 'last_price'
-            market_cap = f_info.get('marketCap', 0)
+            high = getattr(f_info, 'yearHigh', None)
+            current = getattr(f_info, 'lastPrice', None) or getattr(f_info, 'last_price', None)
+            market_cap = getattr(f_info, 'marketCap', 0)
             
             # Condizione minima: Cap > $2B e dati presenti
             if high and current and market_cap > 2000000000:

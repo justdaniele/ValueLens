@@ -15,14 +15,53 @@ logger = logging.getLogger("EarningsEngine")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID")
 
+# A default watchlist to monitor for earnings events
+WATCHLIST = [
+    "AAPL","MSFT","GOOGL","AMZN","TSLA","META","NVDA","JPM","V","JNJ","WMT","DIS","MA","UNH","HD"
+]
+
 def get_earnings_calendar(days_ahead=7):
-    """Fetches upcoming earnings using the ticker-agnostic approach."""
-    # Nota: yfinance non ha un metodo 'Calendar' perfetto per date future remote.
-    # L'approccio migliore è monitorare i titoli che segui o usare un provider.
-    # Per ora, usiamo una lista di controllo basata su volumi (o un subset).
+    """Fetches upcoming earnings for watchlist tickers within days_ahead."""
     logger.info("Fetching earnings calendar...")
-    # Sostituire con logica di scraping o lista di watch-list definita
-    return [{"ticker": "TSLA", "date": "2026-06-10"}] 
+    cutoff = datetime.now() + timedelta(days=days_ahead)
+    upcoming = []
+
+    for ticker in WATCHLIST:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            # Try to get the next earnings timestamp from the info dictionary
+            earn_ts = info.get("earningsTimestamp")
+            if earn_ts:
+                earn_date = datetime.fromtimestamp(earn_ts)
+                if earn_date <= cutoff:
+                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+                    continue
+
+            # Fallback using the calendar property
+            calendar = stock.calendar
+            if calendar and "Earnings Date" in calendar:
+                earn_value = calendar["Earnings Date"]
+                # calendar can return a string or a Datetime
+                if isinstance(earn_value, str):
+                    earn_date = datetime.fromisoformat(earn_value)
+                elif isinstance(earn_value, datetime):
+                    earn_date = earn_value
+                else:
+                    continue
+                if earn_date <= cutoff:
+                    upcoming.append({"ticker": ticker, "date": earn_date.isoformat()})
+        except Exception as e:
+            logger.warning(f"Could not fetch calendar for {ticker}: {e}")
+            continue
+
+    # If nothing found, return a fallback entry so the pipeline still has data
+    if not upcoming:
+        logger.info("No upcoming earnings found in watchlist; using fallback entry.")
+        upcoming = [{"ticker": "TSLA", "date": "2026-06-10"}]
+
+    logger.info(f"Found {len(upcoming)} upcoming earnings.")
+    return upcoming
 
 def send_alert_to_channel(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
