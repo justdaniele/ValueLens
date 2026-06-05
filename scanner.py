@@ -3,46 +3,79 @@ import time
 import logging
 import datetime
 import requests
+import sqlite3
 import pandas as pd
 import yfinance as yf
-from analyzer import analyze_company, get_value_radar
+from analyzer import analyze_company
+from database import DB_NAME
 
+# Configurazione Log su File e Console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("valuelens_scanner.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger("ValueLensScanner")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 
+# ── LOGICA DI MERCATO (YFINANCE + WIKIPEDIA) ──────────────────────────────────
+
 def get_us_market_universe():
-    """Fetches and deduplicates S&P 500 and NASDAQ 100 tickers using Wikipedia."""
+    """Scarica e deduplica i ticker S&P 500 e NASDAQ 100 usando Wikipedia."""
+    logger.info("Scaricamento liste ticker da Wikipedia...")
     try:
         sp500_table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
         sp500_tickers = sp500_table['Symbol'].tolist()
         
-        nasdaq_table = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[4]
-        nasdaq_tickers = nasdaq_table['Ticker'].tolist()
+        # Il NASDAQ-100 table index potrebbe cambiare, di solito è la tabella 4 o 5
+        nasdaq_tables = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")
+        nasdaq_table = None
+        for table in nasdaq_tables:
+            if 'Ticker' in table.columns:
+                nasdaq_table = table
+                break
+        
+        if nasdaq_table is not None:
+             nasdaq_tickers = nasdaq_table['Ticker'].tolist()
+        else:
+             logger.error("Impossibile trovare la colonna 'Ticker' nella pagina del NASDAQ-100.")
+             nasdaq_tickers = []
+             
     except Exception as e:
-        logger.error(f"Failed to fetch dynamic ticker lists: {e}")
+        logger.error(f"Errore durante lo scaricamento delle liste ticker: {e}")
         return [], []
     
+    # Pulizia ticker per Yahoo Finance (es. BRK.B diventa BRK-B)
     sp500_clean = [t.replace('.', '-') for t in sp500_tickers]
     nasdaq_clean = [t.replace('.', '-') for t in nasdaq_tickers]
     
+    # Deduplicazione
     nasdaq_unique = [t for t in nasdaq_clean if t not in sp500_clean]
+    logger.info(f"Trovati {len(sp500_clean)} ticker S&P 500 e {len(nasdaq_unique)} ticker unici NASDAQ 100.")
     return sp500_clean, nasdaq_unique
 
 def fast_value_screen(tickers_list, max_candidates=15):
-    """Screens tickers quickly using lightweight fast_info property."""
+    """Filtra velocemente i ticker basandosi sullo sconto rispetto ai massimi annuali."""
     candidates = []
     
-    for ticker in tickers_list:
+    for i, ticker in enumerate(tickers_list):
+        if i % 50 == 0 and i > 0:
+            logger.info(f"Analizzati {i}/{len(tickers_list)} ticker...")
+            
         try:
             stock = yf.Ticker(ticker)
             f_info = stock.fast_info
             
             high = f_info.get('yearHigh', None)
-            current = f_info.get('last_price', None)
+            current = f_info.get('lastPrice', f_info.get('last_price', None)) # yfinance usa 'lastPrice' o 'last_price'
             market_cap = f_info.get('marketCap', 0)
             
+            # Condizione minima: Cap > $2B e dati presenti
             if high and current and market_cap > 2000000000:
                 discount = (high - current) / high
                 candidates.append({
@@ -51,56 +84,140 @@ def fast_value_screen(tickers_list, max_candidates=15):
                     "market_cap": market_cap
                 })
         except Exception as e:
-            logger.warning(f"Skipping fast scan for {ticker}: {e}")
+             logger.debug(f"Skip {ticker}: dati incompleti o errore ({e})")
             
-        time.sleep(3)
+        time.sleep(1) # Riduciamo lo sleep a 1s per velocizzare la fast_info
         
     candidates.sort(key=lambda x: x['discount'], reverse=True)
-    return [c['ticker'] for c in candidates[:max_candidates]]
+    top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
+    logger.info(f"Top candidati selezionati: {top_tickers}")
+    return top_tickers
+
+# ── LOGICA TELEGRAM (Gestione 4096 Caratteri) ─────────────────────────────────
 
 def broadcast_to_channel(text):
-    """Sends compiled text payload to the designated Telegram channel."""
+    """Invia il testo al canale gestendo i limiti di lunghezza di Telegram."""
     if not BOT_TOKEN or not CHANNEL_ID:
-        logger.error("Telegram environment variables missing.")
-        return
+        logger.error("Variabili ambiente Telegram mancanti.")
+        return False
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
+    
+    # Spezza in blocchi da 4000 caratteri
+    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+    success_all = True
+    
+    for chunk in chunks:
+        payload = {
+            "chat_id": CHANNEL_ID,
+            "text": chunk,
+            "parse_mode": "HTML", # Usiamo HTML, è più robusto del Markdown per testi generati dall'AI
+            "disable_web_page_preview": True
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=15)
+            r.raise_for_status()
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Errore invio messaggio Telegram: {e} | R: {r.text if 'r' in dir() else 'N/A'}")
+            success_all = False
+            
+    return success_all
+
+# ── LOGICA DATABASE (Salvataggio Report) ──────────────────────────────────────
+
+def save_report_to_db(ticker, report_text):
+    """Salva il report generato nel database prima dell'invio."""
     try:
-        requests.post(url, json=payload, timeout=15)
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Creiamo la tabella se non esiste (utile in questa fase di transizione)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS nightly_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date_generated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ticker TEXT,
+                report_text TEXT,
+                status TEXT
+            )
+        """)
+        
+        cursor.execute("""
+            INSERT INTO nightly_reports (ticker, report_text, status)
+            VALUES (?, ?, 'PENDING')
+        """, (ticker, report_text))
+        
+        conn.commit()
+        conn.close()
     except Exception as e:
-        logger.error(f"Failed broadcasting report update: {e}")
+         logger.error(f"Errore salvataggio report {ticker} nel DB: {e}")
+
+# ── ROUTINE PRINCIPALE ────────────────────────────────────────────────────────
 
 def execute_nightly_routine():
-    """Orchestrates the entire multi-stage quantitative funnel and AI analysis."""
-    logger.info("Executing standard market analysis routine.")
+    """L'orchestratore principale del funnel notturno."""
+    logger.info("="*60)
+    logger.info("Avvio ValueLens Nightly Routine (Scanner + Analyzer + Broadcast)")
+    logger.info("="*60)
     
+    # Controllo Week-end (opzionale se gestito via Cron)
+    if datetime.datetime.now().weekday() >= 5:
+        logger.info("Fine settimana rilevato. Nessun mercato aperto. Salto la scansione.")
+        return
+
+    # Fase 1: Ottenimento Universo e Fast Scan
     sp500, nasdaq_unique = get_us_market_universe()
     if not sp500:
-        return
+         logger.error("Impossibile procedere senza le liste ticker.")
+         return
     
-    # Phase 1: S&P 500 Fast Scan
-    sp500_top_candidates = fast_value_screen(sp500, max_candidates=15)
+    logger.info("Fase 1: Scansione Rapida S&P 500...")
+    sp500_top = fast_value_screen(sp500, max_candidates=15)
     
-    # Phase 2: NASDAQ Unique Fast Scan
-    nasdaq_top_candidates = fast_value_screen(nasdaq_unique, max_candidates=5)
+    logger.info("Fase 2: Scansione Rapida NASDAQ (Unici)...")
+    nasdaq_top = fast_value_screen(nasdaq_unique, max_candidates=5)
     
-    total_candidates = sp500_top_candidates + nasdaq_top_candidates
-    logger.info(f"Funnel complete. Selected targets for deep analysis: {total_candidates}")
+    total_candidates = sp500_top + nasdaq_top
+    logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates}")
     
-    compiled_reports = ["🌅 *ValueLens Morning Market Intelligence Report*\n\n"]
+    if not total_candidates:
+         logger.info("Nessun candidato trovato stasera.")
+         return
+
+    # Fase 3: Analisi DeepSeek, Salvataggio DB e Invio Telegram
+    logger.info("Fase 3: Generazione Report AI e Broadcast...")
+    header = "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Target altamente sottovalutati rilevati:</i>\n\n"
+    broadcast_to_channel(header)
     
     for ticker in total_candidates:
+        logger.info(f"Avvio analisi per {ticker}...")
         try:
-            report = analyze_company(ticker, mode="FLASH", lang="it")
-            compiled_reports.append(f"### Analysis for {ticker}\n{report}\n\n---\n\n")
-            time.sleep(15)
-        except Exception as e:
-            logger.error(f"Failed fetching comprehensive analysis for target {ticker}: {e}")
+            # Assumiamo che analyze_company in analyzer.py gestisca l'HTML
+            report = analyze_company(ticker, mode="PRO", lang="en") 
             
-    final_payload = "".join(compiled_reports)
-    broadcast_to_channel(final_payload)
+            # Formattazione per il canale
+            formatted_report = f"<b>[ {ticker} ]</b>\n\n{report}\n\n〰️〰️〰️\n"
+            
+            # 1. Salva nel DB (Tolleranza ai guasti)
+            save_report_to_db(ticker, formatted_report)
+            
+            # 2. Invia singolarmente per evitare il limite dei 4096 caratteri
+            success = broadcast_to_channel(formatted_report)
+            
+            if success:
+                 logger.info(f"Report per {ticker} pubblicato con successo.")
+            else:
+                 logger.warning(f"Salvataggio effettuato, ma fallito invio Telegram per {ticker}.")
+            
+            time.sleep(15) # Pausa tra chiamate AI/Yahoo
+            
+        except Exception as e:
+            logger.error(f"Fallita l'analisi profonda per {ticker}: {e}")
+
+    logger.info("="*60)
+    logger.info("Routine Notturna completata.")
+    logger.info("="*60)
+
+if __name__ == "__main__":
+    execute_nightly_routine()
