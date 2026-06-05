@@ -3,7 +3,7 @@ import logging
 import yfinance as yf
 from openai import OpenAI
 from dotenv import load_dotenv
-import prompts  # Centralized prompts engine integration
+import prompts
 
 load_dotenv()
 logger = logging.getLogger("ValueLensAnalyzer")
@@ -42,7 +42,6 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
             except Exception as fe:
                 logger.warning(f"Financial statement extraction skipped for {ticker.upper()}: {fe}")
 
-        # Dynamically compose system rules based on language and execution mode
         system_style = (
             prompts.SAFETY_RULES + 
             prompts.LANGUAGE_RULES.get(lang, prompts.LANGUAGE_RULES["en"]) + 
@@ -50,6 +49,13 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
         )
         
         MODEL_NAME = "deepseek-v4-pro" if mode == 'PRO' else "deepseek-v4-flash"
+        
+        custom_params = {}
+        if mode == 'PRO':
+            custom_params = {
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": "high"
+            }
         
         raw_data = (
             f"Current Price: {info.get('currentPrice', 'N/A')}\n"
@@ -70,10 +76,10 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
             messages=[
                 {"role": "system", "content": system_style.format(TICKER=ticker.upper())},
                 {"role": "user", "content": f"Generate {mode} report for {ticker.upper()}.\nData:\n{raw_data}"}
-            ]
+            ],
+            extra_body=custom_params if custom_params else None
         )
         
-        # --- BLOCCO SANIFICAZIONE INTEGRATO E VALIDATO ---
         final_output = response.choices[0].message.content
         final_output = final_output.replace("__", "**")
         final_output = final_output.replace("<u>", "").replace("</u>", "")
@@ -89,12 +95,18 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
         logger.info(f"Initializing systematic Index Radar scan sequence for target: {target_index} ({mode})")
         model_choice = "deepseek-v4-pro" if mode == 'PRO' else "deepseek-v4-flash"
         
-        # Compose prompt structure from the centralized prompt engine
         system_style = (
             prompts.SAFETY_RULES + 
             prompts.LANGUAGE_RULES.get(lang, prompts.LANGUAGE_RULES["en"]) + 
             prompts.RADAR_TEMPLATES[mode][lang]
         )
+
+        custom_params = {}
+        if mode == 'PRO':
+            custom_params = {
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": "high"
+            }
 
         logger.info(f"Executing index analysis completion using model framework: {model_choice}")
         response = ai_client.chat.completions.create(
@@ -102,10 +114,10 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
             messages=[
                 {"role": "system", "content": system_style.format(INDEX_NAME=target_index, TICKER_1="INTC", TICKER_2="F")},
                 {"role": "user", "content": f"Scan the {target_index} index, extract 2 undervalued corporate stocks, and run structural stress-tests."}
-            ]
+            ],
+            extra_body=custom_params if custom_params else None
         )
         
-        # --- BLOCCO SANIFICAZIONE INTEGRATO E VALIDATO ---
         final_output = response.choices[0].message.content
         final_output = final_output.replace("__", "**")
         final_output = final_output.replace("<u>", "").replace("</u>", "")
