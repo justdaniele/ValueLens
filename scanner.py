@@ -4,6 +4,7 @@ import logging
 import datetime
 import requests
 import sqlite3
+import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 from analyzer import analyze_company
@@ -25,40 +26,56 @@ logger = logging.getLogger("ValueLensScanner")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 
-# ── STATIC VALUE UNIVERSE (~150 tickers) ──────────────────────────────────────
-# Excludes high‑multiple tech, unprofitable biotech, zero‑growth utilities.
-# Focus on Financials, Energy, Industrials, Materials, Consumer Defensive,
-# and value‑oriented Health Care.
-VALUE_UNIVERSE = [
-    # Financials
-    "JPM","BAC","WFC","C","GS","MS","BLK","SCHW","AXP","USB","PNC","TFC",
-    "COF","BK","STT","KEY","RF","HBAN","FITB","MTB","NTRS","CFG","ZION",
-    # Energy
-    "XOM","CVX","COP","EOG","PXD","OXY","HAL","SLB","BKR","MPC","PSX","VLO",
-    "HES","DVN","MRO","APA","CTRA","FANG","EQT","SWN","RRC","CHK","AR","PR",
-    # Industrials
-    "CAT","DE","GE","HON","MMM","BA","LMT","NOC","GD","RTX","TXT","COL","SPR",
-    "TDG","HEI","AXON","WAB","ETN","EMR","ROK","IR","PH","DOV","SWK","SNA",
-    "IEX","GWW","FAST","MSM","TTC","LECO","KMT","WSO","FERG","WCC","BECN",
-    "AA","FCX","NEM","GOLD","BTG","KGC","AGI","PAAS","WPM","FNV","RGLD",
-    "SSRM","CDE","HL",
-    # Materials
-    "APD","LIN","PX","ECL","SHW","PPG","RPM","AXTA","WDFC","SXT","KWR",
-    "FMC","CF","MOS","NTR","IPI","SMG",
-    # Consumer Defensive
-    "PG","KO","PEP","COST","WMT","TGT","DG","DLTR","KR","SYY","CL","KMB",
-    "CHD","CLX","EL","COTY","IP","WRK","AVY","BALL","CCK","SEE","GPK","SON",
-    "AMCR","BERY","OI","SLGN","TRS","REYN","MYE","PTVE","PACK",
-    # Health Care (value)
-    "JNJ","PFE","MRK","ABBV","BMY","LLY","UNH","CVS","CI","HUM","ANTM","CNC",
-    "MOH","DVA","FMS","BAX","BDX","BSX","SYK","MDT","EW","ISRG","ZBH","SNN",
-    "TFX","COO","RMD","ABT","TMO","DHR","A","WAT","PKI","MHK","IRM","RRD",
-    "ARC","KODK","XRX","CBT","ESI","FUL"
-]
+# ── S&P 500 TICKERS (da Wikipedia) ────────────────────────────────────────────
+
+def get_sp500_tickers():
+    """Scarica la lista dei ticker S&P 500 da Wikipedia."""
+    logger.info("Scaricamento lista S&P 500 da Wikipedia...")
+    try:
+        table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+        tickers = table['Symbol'].tolist()
+        tickers = [t.replace('.', '-') for t in tickers]
+        logger.info(f"Trovati {len(tickers)} ticker S&P 500.")
+        return tickers
+    except Exception as e:
+        logger.error(f"Errore scaricamento S&P 500: {e}")
+        return []
+
+def get_us_market_universe():
+    """Wrapper per compatibilità con earnings_engine.py."""
+    sp500 = get_sp500_tickers()
+    return sp500, []
+
+# ── VALUE UNIVERSE FILTER (da S&P 500) ────────────────────────────────────────
+
+def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
+                          pe_threshold=20, min_market_cap=10e9):
+    """
+    Filtra i ticker S&P 500 per ottenere un universo value di ~150 ticker.
+    Usa fast_info per P/E e market cap.
+    """
+    candidates = []
+    for i, ticker in enumerate(tickers):
+        if i % 50 == 0 and i > 0:
+            logger.info(f"Filter progress: {i}/{len(tickers)} tickers...")
+        try:
+            stock = yf.Ticker(ticker)
+            f_info = stock.fast_info
+            market_cap = getattr(f_info, 'marketCap', 0)
+            trailing_pe = getattr(f_info, 'trailingPE', None)
+            if market_cap > min_market_cap:
+                if trailing_pe is not None and trailing_pe > pe_threshold:
+                    continue
+                candidates.append(ticker)
+        except Exception as e:
+            logger.debug(f"Skip {ticker} during filter: {e}")
+        time.sleep(sleep_seconds)
+    logger.info(f"Value universe filtrato: {len(candidates)} ticker.")
+    return candidates[:max_candidates]
 
 # ── FAST SCREEN (lightweight fast_info) ───────────────────────────────────────
 
-def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=5,
+def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
                       pe_threshold=20, min_market_cap=10e9):
     """
     Pre‑filter using yfinance fast_info.
@@ -238,16 +255,30 @@ def execute_nightly_routine():
         logger.info("Fine settimana rilevato. Nessun mercato aperto. Salto la scansione.")
         return
 
-    # Use static value universe instead of full index
-    logger.info(f"Using static value universe of {len(VALUE_UNIVERSE)} tickers.")
+    # Step 1: Get S&P 500 tickers
+    sp500 = get_sp500_tickers()
+    if not sp500:
+        logger.error("Impossibile ottenere lista S&P 500.")
+        return
     
-    logger.info("Fase 1: Fast Screen (sleep 5s)...")
-    fast_candidates = fast_value_screen(VALUE_UNIVERSE, max_candidates=20, sleep_seconds=5)
+    # Step 2: Filter to value universe (~150 tickers)
+    logger.info("Fase 0: Filtraggio universo value da S&P 500 (sleep 3s)...")
+    value_universe = filter_value_universe(sp500, max_candidates=150, sleep_seconds=3)
+    if not value_universe:
+        logger.info("Nessun ticker value trovato.")
+        return
+    
+    logger.info(f"Universo value: {len(value_universe)} ticker.")
+    
+    # Step 3: Fast screen on value universe
+    logger.info("Fase 1: Fast Screen (sleep 3s)...")
+    fast_candidates = fast_value_screen(value_universe, max_candidates=20, sleep_seconds=3)
     
     if not fast_candidates:
         logger.info("Nessun candidato dopo fast screen.")
         return
     
+    # Step 4: Deep screen
     logger.info(f"Fase 2: Deep Screen su {len(fast_candidates)} candidati (sleep 15s)...")
     total_candidates = deep_value_screen(fast_candidates, max_candidates=15, sleep_seconds=15)
     
@@ -255,28 +286,20 @@ def execute_nightly_routine():
         logger.info("Nessun candidato dopo deep screen.")
         return
     
-    estimated_minutes = round((len(VALUE_UNIVERSE) * 5 + len(fast_candidates) * 15) / 60, 1)
+    estimated_minutes = round((len(value_universe) * 3 + len(fast_candidates) * 15) / 60, 1)
     logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates} (tempo stimato ~{estimated_minutes} min)")
     
-    # Fase 3: Analisi DeepSeek e Salvataggio DB (nessun invio notturno)
+    # Step 5: DeepSeek analysis and save to DB
     logger.info("Fase 3: Generazione Report AI e Salvataggio...")
     
     for ticker in total_candidates:
         logger.info(f"Avvio analisi per {ticker}...")
         try:
-            # Assumiamo che analyze_company in analyzer.py gestisca l'HTML
             report = analyze_company(ticker, mode="PRO", lang="en") 
-            
-            # Formattazione per il canale
             formatted_report = f"<b>[ {ticker} ]</b>\n\n{report}\n\n〰️〰️〰️\n"
-            
-            # Salva nel DB (Tolleranza ai guasti)
             save_report_to_db(ticker, formatted_report)
-            
             logger.info(f"Report per {ticker} salvato nel DB.")
-            
-            time.sleep(15) # Pausa tra chiamate AI/Yahoo
-            
+            time.sleep(15)
         except Exception as e:
             logger.error(f"Fallita l'analisi profonda per {ticker}: {e}")
 
