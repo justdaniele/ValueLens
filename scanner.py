@@ -5,8 +5,11 @@ import datetime
 import requests
 import sqlite3
 import yfinance as yf
+from dotenv import load_dotenv
 from analyzer import analyze_company
 from database import DB_NAME
+
+load_dotenv()
 
 # Configurazione Log su File e Console
 logging.basicConfig(
@@ -186,6 +189,10 @@ def morning_broadcast():
         else:
             logger.warning(f"Failed to send morning report for {ticker}.")
         time.sleep(2)
+    # Invia riepilogo
+    summary = f"🌅 Morning report: {len(rows)} reports sent."
+    broadcast_to_channel(summary)
+    logger.info(summary)
     conn.commit()
     conn.close()
 

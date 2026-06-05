@@ -68,6 +68,7 @@ async def core_scheduler_loop():
             await wait_until(8, 0)
             logger.info("⏰ [08:00 AM] Triggering Morning Broadcast...")
             await asyncio.to_thread(morning_broadcast)
+            send_alert_to_channel("🌅 Morning report published.")
             logger.info("Morning broadcast complete.")
             
         except Exception as e:
