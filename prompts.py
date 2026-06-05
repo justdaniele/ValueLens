@@ -74,6 +74,11 @@ SAFETY_RULES = (
     "- NEVER use raw formatting characters or weird indentation arrows like ↳ or 🚀 inside bullet points.\n"
     "- Separate EVERY metric, header, and distinct commentary block with a double line break (\\n\\n).\n"
     "- Use clean paragraph spacing so the user can easily read the text on small mobile screens.\n"
+    "\n\nCRITICAL TELEGRAM FORMATTING RULE:\n"
+    "- NEVER use double underscores (__text__) for bolding or styling, because Telegram interprets them as UNDERLINE.\n"
+    "- ALWAYS use double asterisks (**text**) exclusively for bold text.\n"
+    "- NEVER use single underscores (_) for italics, use single asterisks (*) if absolutely needed.\n"
+    "- Ensure all markdown tags are perfectly opened and closed. Do not leave trailing or unclosed formatting tags.\n"
 )
 
 LANGUAGE_RULES = {
