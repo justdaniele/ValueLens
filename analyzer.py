@@ -72,7 +72,12 @@ def analyze_company(ticker: str, mode: str, lang: str = "en") -> str:
                 {"role": "user", "content": f"Generate {mode} report for {ticker.upper()}.\nData:\n{raw_data}"}
             ]
         )
-        return response.choices[0].message.content
+        
+        # Sanitize output to force safe bold formatting and neutralize Telegram's underline glitch
+        final_output = response.choices[0].message.content
+        final_output = final_output.replace("__", "**")
+        
+        return final_output
     except Exception as e:
         logger.error(f"Critical execution failure during stock analysis for {ticker.upper()}: {e}")
         return f"❌ Error analyzing {ticker.upper()}: {str(e)}"
@@ -98,7 +103,12 @@ def get_value_radar(target_index: str, mode: str, lang: str = "en") -> str:
                 {"role": "user", "content": f"Scan the {target_index} index, extract 2 undervalued corporate stocks, and run structural stress-tests."}
             ]
         )
-        return response.choices[0].message.content
+        
+        # Sanitize output to force safe bold formatting and neutralize Telegram's underline glitch
+        final_output = response.choices[0].message.content
+        final_output = final_output.replace("__", "**")
+        
+        return final_output
     except Exception as e:
         logger.error(f"Error caught running Value Radar on financial index {target_index}: {e}")
         return f"❌ Error running Value Radar on {target_index}: {str(e)}"
