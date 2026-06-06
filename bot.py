@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # Import autonomous tasks and database persistence
 from scanner import execute_nightly_routine, morning_broadcast
 from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy_loop
-from earnings_engine import send_alert_to_channel
+from earnings_engine import send_alert_to_channel, run_earnings_pipeline
 
 load_dotenv()
 
@@ -41,17 +41,15 @@ async def core_scheduler_loop():
     
     while True:
         try:
-            # Schedule execution for 02:00 AM nightly
+            # 1. Run Earnings Sniper Engine at 01:00 AM to prevent API rate limiting issues
+            await wait_until(1, 0)
+            logger.info("⏰ [01:00 AM] Triggering Earnings Sniper Engine...")
+            await run_earnings_pipeline()
+            logger.info("✅ Earnings Sniper Engine pipeline completed.")
+            
+            # 2. Run Nightly Value Scanner at 02:00 AM
             await wait_until(2, 0)
-            
-            # Skip operational pipeline during weekends when markets are closed
-            if datetime.datetime.now().weekday() >= 5:
-                logger.info("Weekend detected. Skipping operational market jobs.")
-                continue
-                
-            logger.info("⏰ [02:00 AM] Triggering Nightly Quantitative Funnel...")
-            
-            # Execute market scanner inside a separate asynchronous thread to avoid blocking the main loop
+            logger.info("⏰ [02:00 AM] Triggering Nightly Routine...")
             await asyncio.to_thread(execute_nightly_routine)
             
             # Evaluate historical prediction accuracy and broadcast metrics
@@ -64,7 +62,7 @@ async def core_scheduler_loop():
             
             logger.info("✅ Nightly routine complete. Returning to time-monitoring mode.")
             
-            # Morning report at 08:00
+            # 3. Morning report broadcast at 08:00 AM
             await wait_until(8, 0)
             logger.info("⏰ [08:00 AM] Triggering Morning Broadcast...")
             await asyncio.to_thread(morning_broadcast)

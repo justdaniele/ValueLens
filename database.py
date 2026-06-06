@@ -32,16 +32,25 @@ def init_db():
         )
     """)
     
-    # Nightly raw market reports persistence storage
+    # Nightly raw market reports persistence storage (Updated with 'lang' column)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS nightly_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date_generated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             ticker TEXT,
             report_text TEXT,
+            lang TEXT DEFAULT 'en',
             status TEXT DEFAULT 'PENDING'
         )
     """)
+    
+    # Automatic migration: if the table already exists without the 'lang' column, we add it
+    try:
+        cursor.execute("ALTER TABLE nightly_reports ADD COLUMN lang TEXT DEFAULT 'en'")
+        logger.info("Database migration: Added 'lang' column to 'nightly_reports'.")
+    except sqlite3.OperationalError:
+        # Column already exists, no issue
+        pass
     
     # Earnings sniper predictions persistence table
     cursor.execute("""
@@ -111,18 +120,15 @@ def evaluate_historical_accuracy_loop():
         if datetime.now() - timestamp > timedelta(days=2):
             try:
                 stock = yf.Ticker(ticker)
-                # Attempt to get standard price points safely
                 current_close = stock.info.get("currentPrice") or stock.info.get("regularMarketPrice")
                 
                 if pred != "NEUTRAL" and current_close is not None:
                     is_successful_call = (pred == "BULLISH" and current_close > old_price) or (pred == "BEARISH" and current_close < old_price)
                     
-                    # Atomic Increment Steps inside the metadata system
                     cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_total'")
                     if is_successful_call:
                         cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_wins'")
                 
-                # Flag record as evaluated to filter it out from future checks
                 cursor.execute("UPDATE earnings_predictions SET is_evaluated = 1 WHERE ticker = ?", (ticker,))
                 logger.info(f"Historical verification successfully recorded for asset: {ticker}.")
             except Exception as e:

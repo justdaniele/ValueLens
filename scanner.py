@@ -12,7 +12,7 @@ from database import DB_NAME
 
 load_dotenv()
 
-# Configurazione Log su File e Console
+# File and Console Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -24,37 +24,34 @@ logging.basicConfig(
 logger = logging.getLogger("ValueLensScanner")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
+CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
+CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
 
-# ── S&P 500 TICKERS (da Wikipedia) ────────────────────────────────────────────
+# ── S&P 500 TICKERS (From Wikipedia) ──────────────────────────────────────────
 
 def get_sp500_tickers():
-    """Scarica la lista dei ticker S&P 500 da Wikipedia."""
-    logger.info("Scaricamento lista S&P 500 da Wikipedia...")
+    """Downloads the S&P 500 ticker list from Wikipedia."""
+    logger.info("Downloading S&P 500 list from Wikipedia...")
     try:
         table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
         tickers = table['Symbol'].tolist()
         tickers = [t.replace('.', '-') for t in tickers]
-        logger.info(f"Trovati {len(tickers)} ticker S&P 500.")
+        logger.info(f"Found {len(tickers)} S&P 500 tickers.")
         return tickers
     except Exception as e:
-        logger.error(f"Errore scaricamento S&P 500: {e}")
+        logger.error(f"Error downloading S&P 500 list: {e}")
         return []
 
 def get_us_market_universe():
-    """Wrapper per compatibilità con earnings_engine.py."""
+    """Wrapper function for compatibility with earnings_engine.py."""
     sp500 = get_sp500_tickers()
     return sp500, []
 
-# ── VALUE UNIVERSE FILTER (da S&P 500) ────────────────────────────────────────
+# ── VALUE UNIVERSE FILTER (From S&P 500) ──────────────────────────────────────
 
 def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
                           pe_threshold=20):
-    """
-    Filtra i ticker S&P 500 per ottenere un universo value di ~150 ticker.
-    Usa fast_info per P/E. Tutti i ticker S&P 500 hanno market cap > 22B,
-    quindi non serve filtrarli per capitalizzazione.
-    """
+    """Filters S&P 500 tickers to extract a preliminary value universe."""
     candidates = []
     for i, ticker in enumerate(tickers):
         if i % 50 == 0 and i > 0:
@@ -69,18 +66,14 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
         except Exception as e:
             logger.debug(f"Skip {ticker} during filter: {e}")
         time.sleep(sleep_seconds)
-    logger.info(f"Value universe filtrato: {len(candidates)} ticker.")
+    logger.info(f"Filtered Value Universe size: {len(candidates)} tickers.")
     return candidates[:max_candidates]
 
-# ── FAST SCREEN (lightweight fast_info) ───────────────────────────────────────
+# ── FAST SCREEN (Lightweight fast_info) ───────────────────────────────────────
 
 def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
                       pe_threshold=20):
-    """
-    Pre‑filter using yfinance fast_info.
-    Skips tickers with trailing P/E above pe_threshold.
-    Returns the top max_candidates by discount from 52‑week high.
-    """
+    """Pre‑filters using yfinance fast_info to sort by deep discount."""
     candidates = []
     for i, ticker in enumerate(tickers_list):
         if i % 50 == 0 and i > 0:
@@ -92,7 +85,6 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
             current = getattr(f_info, 'lastPrice', None) or getattr(f_info, 'last_price', None)
             trailing_pe = getattr(f_info, 'trailingPE', None)
             if high and current:
-                # Skip high‑P/E names (value screen)
                 if trailing_pe is not None and trailing_pe > pe_threshold:
                     continue
                 discount = (high - current) / high
@@ -109,14 +101,10 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
     logger.info(f"Fast‑screen top candidates: {top_tickers}")
     return top_tickers
 
-# ── DEEP SCREEN (full stock.info) ─────────────────────────────────────────────
+# ── DEEP SCREEN (Full stock.info) ─────────────────────────────────────────────
 
 def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15):
-    """
-    Second‑pass filter using full stock.info.
-    Uses analyst target mean price to compute upside.
-    Returns the top max_candidates by upside.
-    """
+    """Second‑pass structural filter using full stock.info sorted by analyst upside."""
     candidates = []
     for ticker in tickers_list:
         try:
@@ -144,25 +132,23 @@ def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15):
     logger.info(f"Deep‑screen top candidates: {top_tickers}")
     return top_tickers
 
-# ── LOGICA TELEGRAM (Gestione 4096 Caratteri) ─────────────────────────────────
+# ── TELEGRAM LOGIC ────────────────────────────────────────────────────────────
 
-def broadcast_to_channel(text):
-    """Invia il testo al canale gestendo i limiti di lunghezza di Telegram."""
-    if not BOT_TOKEN or not CHANNEL_ID:
-        logger.error("Variabili ambiente Telegram mancanti.")
+def broadcast_to_channel(text, channel_id):
+    """Dispatches text payloads to a specified Telegram channel handling length constraints."""
+    if not BOT_TOKEN or not channel_id:
+        logger.error(f"Missing Telegram Bot Token or Channel ID context for target: {channel_id}")
         return False
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    
-    # Spezza in blocchi da 4000 caratteri
     chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
     success_all = True
     
     for chunk in chunks:
         payload = {
-            "chat_id": CHANNEL_ID,
+            "chat_id": channel_id,
             "text": chunk,
-            "parse_mode": "HTML", # Usiamo HTML, è più robusto del Markdown per testi generati dall'AI
+            "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
         try:
@@ -170,138 +156,138 @@ def broadcast_to_channel(text):
             r.raise_for_status()
             time.sleep(1)
         except Exception as e:
-            logger.error(f"Errore invio messaggio Telegram: {e} | R: {r.text if 'r' in dir() else 'N/A'}")
+            logger.error(f"Telegram dispatch failed: {e} | Response: {r.text if 'r' in dir() else 'N/A'}")
             success_all = False
             
     return success_all
 
 def morning_broadcast():
-    """Invia al canale il report mattutino basato sui report salvati durante la notte."""
+    """Routes the compiled morning reports to IT and EN channels based on DB flags."""
     logger.info("Morning broadcast triggered.")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("""
-        SELECT ticker, report_text FROM nightly_reports
-        WHERE date(date_generated) = ? AND status = 'PENDING'
-    """, (today,))
-    rows = cursor.fetchall()
-    if not rows:
-        logger.info("No pending reports for today.")
-        conn.close()
-        return
-    # Invia header
-    header = "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Target altamente sottovalutati rilevati:</i>\n\n"
-    broadcast_to_channel(header)
-    for ticker, report_text in rows:
-        formatted = f"<b>[ {ticker} ]</b>\n\n{report_text}\n\n〰️〰️〰️\n"
-        success = broadcast_to_channel(formatted)
-        if success:
-            # Aggiorna status a 'SENT'
-            cursor.execute("UPDATE nightly_reports SET status = 'SENT' WHERE ticker = ? AND date(date_generated) = ?", (ticker, today))
-            logger.info(f"Morning report sent for {ticker}.")
-        else:
-            logger.warning(f"Failed to send morning report for {ticker}.")
-        time.sleep(2)
-    # Invia riepilogo
-    summary = f"🌅 Morning report: {len(rows)} reports sent."
-    broadcast_to_channel(summary)
-    logger.info(summary)
+    
+    # Target channels configuration mapped by destination language and headers
+    channels_setup = [
+        {"id": CHANNEL_ID_IT, "lang": "it", "header": "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Rilevati target altamente sottovalutati:</i>\n\n", "summary_tmpl": "🌅 Report Mattutino: inviati {} report in Italiano."},
+        {"id": CHANNEL_ID_EN, "lang": "en", "header": "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Highly undervalued targets detected:</i>\n\n", "summary_tmpl": "🌅 Morning Report: {} English reports sent."}
+    ]
+    
+    for channel in channels_setup:
+        if not channel["id"]:
+            continue
+            
+        cursor.execute("""
+            SELECT ticker, report_text FROM nightly_reports
+            WHERE date(date_generated) = ? AND status = 'PENDING' AND lang = ?
+        """, (today, channel["lang"]))
+        rows = cursor.fetchall()
+        
+        if not rows:
+            logger.info(f"No pending reports found for language locale: {channel['lang']}")
+            continue
+            
+        # Send initial Channel Header
+        broadcast_to_channel(channel["header"], channel["id"])
+        
+        for ticker, report_text in rows:
+            formatted = f"<b>[ {ticker} ]</b>\n\n{report_text}\n\n〰️〰️〰️\n"
+            success = broadcast_to_channel(formatted, channel["id"])
+            if success:
+                cursor.execute("""
+                    UPDATE nightly_reports SET status = 'SENT' 
+                    WHERE ticker = ? AND date(date_generated) = ? AND lang = ?
+                """, (ticker, today, channel["lang"]))
+                logger.info(f"Report successfully dispatched for {ticker} ({channel['lang']}).")
+            else:
+                logger.warning(f"Failed broadcasting report for {ticker} ({channel['lang']}).")
+            time.sleep(2)
+            
+        summary = channel["summary_tmpl"].format(len(rows))
+        broadcast_to_channel(summary, channel["id"])
+        logger.info(summary)
+        
     conn.commit()
     conn.close()
 
-# ── LOGICA DATABASE (Salvataggio Report) ──────────────────────────────────────
+# ── DATABASE LOGIC ────────────────────────────────────────────────────────────
 
-def save_report_to_db(ticker, report_text):
-    """Salva il report generato nel database prima dell'invio."""
+def save_report_to_db(ticker, report_text, lang):
+    """Saves generated equity analytical briefs to local disk ledger storage."""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         
-        # Creiamo la tabella se non esiste (utile in questa fase di transizione)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS nightly_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date_generated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ticker TEXT,
-                report_text TEXT,
-                status TEXT
-            )
-        """)
-        
-        cursor.execute("""
-            INSERT INTO nightly_reports (ticker, report_text, status)
-            VALUES (?, ?, 'PENDING')
-        """, (ticker, report_text))
+            INSERT INTO nightly_reports (ticker, report_text, lang, status)
+            VALUES (?, ?, ?, 'PENDING')
+        """, (ticker, report_text, lang))
         
         conn.commit()
         conn.close()
     except Exception as e:
-         logger.error(f"Errore salvataggio report {ticker} nel DB: {e}")
+         logger.error(f"Error persisting report asset {ticker} ({lang}) to database: {e}")
 
-# ── ROUTINE PRINCIPALE ────────────────────────────────────────────────────────
+# ── MAIN OPERATION PIPELINE ───────────────────────────────────────────────────
 
 def execute_nightly_routine():
-    """L'orchestratore principale del funnel notturno."""
+    """Main orchestrator execution loop handling the bilingual nightly screening funnel."""
     logger.info("="*60)
-    logger.info("Avvio ValueLens Nightly Routine (Scanner + Analyzer + Broadcast)")
+    logger.info("Starting ValueLens Bilingual Nightly Routine (Scanner + Analyzer)")
     logger.info("="*60)
     
-    # Controllo Week-end (opzionale se gestito via Cron)
     if datetime.datetime.now().weekday() >= 5:
-        logger.info("Fine settimana rilevato. Nessun mercato aperto. Salto la scansione.")
+        logger.info("Weekend detected. Equity markets closed. Aborting execution routine.")
         return
 
-    # Step 1: Get S&P 500 tickers
     sp500 = get_sp500_tickers()
     if not sp500:
-        logger.error("Impossibile ottenere lista S&P 500.")
+        logger.error("Failed retrieving S&P 500 baseline indices.")
         return
     
-    # Step 2: Filter to value universe (~150 tickers)
-    logger.info("Fase 0: Filtraggio universo value da S&P 500 (sleep 3s)...")
+    logger.info("Phase 0: Filtering value universe from S&P 500 (sleep 3s)...")
     value_universe = filter_value_universe(sp500, max_candidates=150, sleep_seconds=3)
     if not value_universe:
-        logger.info("Nessun ticker value trovato.")
+        logger.info("No value targets matched baseline criteria.")
         return
     
-    logger.info(f"Universo value: {len(value_universe)} ticker.")
-    
-    # Step 3: Fast screen on value universe
-    logger.info("Fase 1: Fast Screen (sleep 3s)...")
+    logger.info("Phase 1: Launching Fast Price Screening (sleep 3s)...")
     fast_candidates = fast_value_screen(value_universe, max_candidates=20, sleep_seconds=3)
-    
     if not fast_candidates:
-        logger.info("Nessun candidato dopo fast screen.")
+        logger.info("No assets survived the fast screening pass.")
         return
     
-    # Step 4: Deep screen
-    logger.info(f"Fase 2: Deep Screen su {len(fast_candidates)} candidati (sleep 15s)...")
+    logger.info(f"Phase 2: Initiating Deep Fundamentals Screen on {len(fast_candidates)} candidates (sleep 15s)...")
     total_candidates = deep_value_screen(fast_candidates, max_candidates=15, sleep_seconds=15)
-    
     if not total_candidates:
-        logger.info("Nessun candidato dopo deep screen.")
+        logger.info("No candidates passed the deep quantitative screen.")
         return
     
-    estimated_minutes = round((len(value_universe) * 3 + len(fast_candidates) * 15) / 60, 1)
-    logger.info(f"Funnel completato. Titoli selezionati per Deep Analysis: {total_candidates} (tempo stimato ~{estimated_minutes} min)")
-    
-    # Step 5: DeepSeek analysis and save to DB
-    logger.info("Fase 3: Generazione Report AI e Salvataggio...")
+    logger.info(f"Funnel successfully processed. Target securities selected for analysis: {total_candidates}")
+    logger.info("Phase 3: Triggering Dual-Language Generative AI Analysis & DB Commit...")
     
     for ticker in total_candidates:
-        logger.info(f"Avvio analisi per {ticker}...")
+        # 1. Generate and save the report IN ENGLISH
         try:
-            report = analyze_company(ticker, mode="PRO", lang="en") 
-            formatted_report = f"<b>[ {ticker} ]</b>\n\n{report}\n\n〰️〰️〰️\n"
-            save_report_to_db(ticker, formatted_report)
-            logger.info(f"Report per {ticker} salvato nel DB.")
-            time.sleep(15)
+            logger.info(f"Generating EN report for target: {ticker}...")
+            report_en = analyze_company(ticker, mode="PRO", lang="en")
+            save_report_to_db(ticker, report_en, "en")
+            time.sleep(10)
         except Exception as e:
-            logger.error(f"Fallita l'analisi profonda per {ticker}: {e}")
+            logger.error(f"Deep analytical call EN failed for target {ticker}: {e}")
+
+        # 2. Generate and save the report IN ITALIAN
+        try:
+            logger.info(f"Generating IT report for target: {ticker}...")
+            report_it = analyze_company(ticker, mode="PRO", lang="it")
+            save_report_to_db(ticker, report_it, "it")
+            time.sleep(10)
+        except Exception as e:
+            logger.error(f"Deep analytical call IT failed for target {ticker}: {e}")
 
     logger.info("="*60)
-    logger.info("Routine Notturna completata.")
+    logger.info("Nightly Analytical Pipeline fully completed for both localized channels.")
     logger.info("="*60)
 
 if __name__ == "__main__":
