@@ -32,7 +32,7 @@ def init_db():
         )
     """)
     
-    # Nightly raw market reports persistence storage (Updated with 'lang' column)
+    # Nightly raw market reports persistence storage
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS nightly_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,3 +136,42 @@ def evaluate_historical_accuracy_loop():
                 
     conn.commit()
     conn.close()
+
+
+def get_weekly_summary_stats() -> dict:
+    """
+    Queries the database layer to aggregate performance metrics for the past 7 days.
+    Compiles operational volumes, global accuracy levels, and detects the top active ticker.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # 1. Fetch global accuracy scores from system metadata
+    cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_wins'")
+    wins_row = cursor.fetchone()
+    cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_total'")
+    total_row = cursor.fetchone()
+    
+    global_wins = int(wins_row[0]) if wins_row else 0
+    global_total = int(total_row[0]) if total_row else 0
+    global_pct = f"{(global_wins / global_total) * 100:.1f}%" if global_total > 0 else "0.0%"
+    
+    # 2. Count active structural triggers initialized over the last 7 days
+    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("SELECT COUNT(*) FROM earnings_predictions WHERE timestamp >= ?", (seven_days_ago,))
+    weekly_alerts_count = cursor.fetchone()[0] or 0
+    
+    # 3. Fetch the latest evaluated corporate target as placeholder for weekly highlight
+    cursor.execute("SELECT ticker FROM earnings_predictions WHERE is_evaluated = 1 ORDER BY timestamp DESC LIMIT 1")
+    top_ticker_row = cursor.fetchone()
+    top_ticker = top_ticker_row[0] if top_ticker_row else "N/A"
+    
+    conn.close()
+    
+    return {
+        "global_wins": global_wins,
+        "global_total": global_total,
+        "global_pct": global_pct,
+        "weekly_alerts": weekly_alerts_count,
+        "top_ticker": top_ticker
+    }

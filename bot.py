@@ -4,14 +4,15 @@ import logging
 import datetime
 from dotenv import load_dotenv
 
-# Import autonomous tasks and database persistence
+# Import autonomous tasks, database utilities, and multi-lingual distribution networks
 from scanner import execute_nightly_routine, morning_broadcast
 from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy_loop
 from earnings_engine import send_alert_to_channel, run_earnings_pipeline
+from weekly_engine import generate_and_broadcast_weekly_recap
 
 load_dotenv()
 
-# Centralized Logging Configuration (Console + File)
+# Centralized System Logging Configuration (Console + File)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] ValueLensMaster: %(message)s",
@@ -41,44 +42,68 @@ async def core_scheduler_loop():
     
     while True:
         try:
-            # 1. Run Earnings Sniper Engine at 01:00 AM to prevent API rate limiting issues
+            # Capture real-time hardware calendar state
+            today = datetime.datetime.now()
+            
+            # --- WEEKEND INTERVAL OPERATION (Saturday Recap Routing) ---
+            if today.weekday() == 5:
+                await wait_until(9, 0)  # Wait until Saturday morning at 09:00 AM
+                logger.info("⏰ [09:00 AM - Saturday] Launching Weekly Performance Recap Engine...")
+                await asyncio.to_thread(generate_and_broadcast_weekly_recap)
+                logger.info("✅ Weekly Performance Recap broadcast complete. Suspending to sleep cycle.")
+                
+                # Cooldown period buffer to avoid rapid double-triggering inside the execution minute
+                await asyncio.sleep(3600)
+                continue
+            
+            # --- STANDARD WEEKDAY MARKET OPERATIONS (Monday to Friday) ---
+            
+            # 1. Run Earnings Sniper Engine at 01:00 AM to process upcoming catalyst profiles
             await wait_until(1, 0)
             logger.info("⏰ [01:00 AM] Triggering Earnings Sniper Engine...")
             await run_earnings_pipeline()
             logger.info("✅ Earnings Sniper Engine pipeline completed.")
             
-            # 2. Run Nightly Value Scanner at 02:00 AM
+            # 2. Run Nightly Value Scanner Funnel at 02:00 AM
             await wait_until(2, 0)
             logger.info("⏰ [02:00 AM] Triggering Nightly Routine...")
             await asyncio.to_thread(execute_nightly_routine)
             
-            # Evaluate historical prediction accuracy and broadcast metrics
-            logger.info("Evaluating historical accuracy...")
+            # Audit older prediction states and calculate real-time win ratios
+            logger.info("Evaluating historical accuracy data matrices...")
             await asyncio.to_thread(evaluate_historical_accuracy_loop)
             wins, total, pct = get_accuracy_metrics()
-            msg = f"📊 Accuracy Report: {wins}/{total} ({pct})"
-            send_alert_to_channel(msg)
-            logger.info(msg)
+            
+            # Compile dual-language system health and performance alerts
+            msg_en = f"📊 <b>Accuracy Performance Report:</b> {wins}/{total} ({pct} wins)"
+            msg_it = f"📊 <b>Report Storico Accuratezza:</b> {wins}/{total} ({pct} di successo)"
+            send_alert_to_channel(msg_en, msg_it)
+            logger.info(msg_en)
             
             logger.info("✅ Nightly routine complete. Returning to time-monitoring mode.")
             
-            # 3. Morning report broadcast at 08:00 AM
+            # 3. Morning Intelligence Briefing Broadcast at 08:00 AM
             await wait_until(8, 0)
             logger.info("⏰ [08:00 AM] Triggering Morning Broadcast...")
             await asyncio.to_thread(morning_broadcast)
-            send_alert_to_channel("🌅 Morning report published.")
-            logger.info("Morning broadcast complete.")
+            
+            # Broadcast multi-lingual operational success milestones
+            send_alert_to_channel(
+                "🌅 <b>System Notice:</b> Morning intelligence report published.", 
+                "🌅 <b>Notifica di Sistema:</b> Report d'intelligence mattutino pubblicato."
+            )
+            logger.info("Morning broadcast sequence complete.")
             
         except Exception as e:
             logger.error(f"Critical error caught inside Master Scheduler loop: {e}")
-            await asyncio.sleep(60)  # Safety delay to prevent rapid infinite crash loops
+            await asyncio.sleep(60)  # Standard circuit-breaker safety delay to prevent loop panics
 
 if __name__ == "__main__":
-    # Initialize SQLite schema if tables do not exist
+    # Validate and initialize dynamic database schemas
     init_db()
     
-    # Launch main infinite asynchronous scheduler
+    # Initialize main infinite background core engine loop
     try:
         asyncio.run(core_scheduler_loop())
     except KeyboardInterrupt:
-        logger.info("Controlled shutdown of Master Engine requested by user.")
+        logger.info("Controlled hardware shutdown of Master Engine requested by user.")
