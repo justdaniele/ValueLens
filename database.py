@@ -3,9 +3,7 @@ import logging
 from datetime import datetime, timedelta
 import yfinance as yf
 
-# Configure internal module logger
 logger = logging.getLogger("ValueLensDatabase")
-
 DB_NAME = "valuelens.db"
 
 def init_db():
@@ -13,7 +11,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Metadata configuration table (Global System Trackers)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
@@ -21,7 +18,6 @@ def init_db():
         )
     """)
     
-    # Insider tracking signals data architecture
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS insider_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +28,6 @@ def init_db():
         )
     """)
     
-    # Nightly raw market reports persistence storage
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS nightly_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,110 +38,86 @@ def init_db():
             status TEXT DEFAULT 'PENDING'
         )
     """)
-    
-    # Automatic migration: if the table already exists without the 'lang' column, we add it
-    try:
-        cursor.execute("ALTER TABLE nightly_reports ADD COLUMN lang TEXT DEFAULT 'en'")
-        logger.info("Database migration: Added 'lang' column to 'nightly_reports'.")
-    except sqlite3.OperationalError:
-        # Column already exists, no issue
-        pass
-    
-    # Earnings sniper predictions persistence table
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS earnings_predictions (
-            ticker TEXT PRIMARY KEY,
-            trigger_price REAL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ticker TEXT,
+            price_at_signal REAL,
             prediction TEXT,
-            timestamp TEXT,
             is_evaluated INTEGER DEFAULT 0
         )
     """)
     
-    # Initialize core operational metadata entries safely
-    cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('last_insider_scan', 'NEVER')")
+    # Initialize accuracy counters if they do not exist
     cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('accuracy_wins', '0')")
     cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('accuracy_total', '0')")
     
     conn.commit()
     conn.close()
-    logger.info("Database schemas fully initialized, migrated, and synchronized.")
 
-
-# --- Persistent Earnings & Accuracy Tracking Functions ---
-
-def get_accuracy_metrics() -> tuple:
-    """Reads current quantitative win/loss statistics from the metadata layer."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_wins'")
-    wins = int(cursor.fetchone()[0])
-    
-    cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_total'")
-    total = int(cursor.fetchone()[0])
-    
-    conn.close()
-    
-    accuracy_percentage = (wins / total * 100) if total > 0 else 0.0
-    return wins, total, f"{round(accuracy_percentage, 1)}%"
-
-
-def save_earnings_prediction(ticker: str, current_price: float, direction: str):
-    """Stores a pending corporate catalyst prediction safely to disk storage."""
+def save_earnings_prediction(ticker, price, prediction):
+    """Saves the directional prediction for a specific ticker ahead of its earnings release."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR REPLACE INTO earnings_predictions (ticker, trigger_price, prediction, timestamp, is_evaluated)
-        VALUES (?, ?, ?, ?, 0)
-    """, (ticker, current_price, direction, datetime.now().isoformat()))
+        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction)
+        VALUES (?, ?, ?)
+    """, (ticker, price, prediction))
     conn.commit()
     conn.close()
-
 
 def evaluate_historical_accuracy_loop():
-    """Validates older predictions against current spot closes to update global tracking statistics."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT ticker, trigger_price, prediction, timestamp FROM earnings_predictions WHERE is_evaluated = 0")
-    pending_rows = cursor.fetchall()
-    
-    for row in pending_rows:
-        ticker, old_price, pred, timestamp_str = row
-        timestamp = datetime.fromisoformat(timestamp_str)
+    """Checks predictions older than 24h, compares the new price, and records Win/Loss."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
         
-        # Evaluate performance conditions only after a 48-hour analytical execution buffer
-        if datetime.now() - timestamp > timedelta(days=2):
+        # Fetch predictions older than 24 hours that haven't been evaluated yet
+        target_time = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("SELECT id, ticker, price_at_signal, prediction FROM earnings_predictions WHERE is_evaluated = 0 AND timestamp <= ?", (target_time,))
+        rows = cursor.fetchall()
+        
+        wins_added = 0
+        total_added = 0
+        
+        for row in rows:
+            record_id, ticker, price_old, prediction = row
             try:
                 stock = yf.Ticker(ticker)
-                current_close = stock.info.get("currentPrice") or stock.info.get("regularMarketPrice")
+                price_new = stock.fast_info.last_price
                 
-                if pred != "NEUTRAL" and current_close is not None:
-                    is_successful_call = (pred == "BULLISH" and current_close > old_price) or (pred == "BEARISH" and current_close < old_price)
+                is_win = False
+                if prediction == "BULLISH" and price_new > price_old:
+                    is_win = True
+                elif prediction == "BEARISH" and price_new < price_old:
+                    is_win = True
                     
-                    cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_total'")
-                    if is_successful_call:
-                        cursor.execute("UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'accuracy_wins'")
+                if is_win:
+                    wins_added += 1
+                total_added += 1
                 
-                cursor.execute("UPDATE earnings_predictions SET is_evaluated = 1 WHERE ticker = ?", (ticker,))
-                logger.info(f"Historical verification successfully recorded for asset: {ticker}.")
+                # Flag the record as evaluated
+                cursor.execute("UPDATE earnings_predictions SET is_evaluated = 1 WHERE id = ?", (record_id,))
+                logger.info(f"Evaluated {ticker}: Old ${price_old:.2f} -> New ${price_new:.2f}. Pred: {prediction}. Win: {is_win}")
             except Exception as e:
-                logger.error(f"Failed pulling real-time market settlement data for evaluation context {ticker}: {e}")
+                logger.warning(f"Could not evaluate {ticker}: {e}")
                 
-    conn.commit()
-    conn.close()
+        # Update global accuracy trackers if new evaluations occurred
+        if total_added > 0:
+            cursor.execute("UPDATE metadata SET value = value + ? WHERE key = 'accuracy_wins'", (wins_added,))
+            cursor.execute("UPDATE metadata SET value = value + ? WHERE key = 'accuracy_total'", (total_added,))
+            
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error in evaluate_historical_accuracy_loop: {e}")
 
-
-def get_weekly_summary_stats() -> dict:
-    """
-    Queries the database layer to aggregate performance metrics for the past 7 days.
-    Compiles operational volumes, global accuracy levels, and detects the top active ticker.
-    """
+def get_accuracy_metrics():
+    """Fetches global historical accuracy performance metrics."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # 1. Fetch global accuracy scores from system metadata
     cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_wins'")
     wins_row = cursor.fetchone()
     cursor.execute("SELECT value FROM metadata WHERE key = 'accuracy_total'")
@@ -155,23 +126,28 @@ def get_weekly_summary_stats() -> dict:
     global_wins = int(wins_row[0]) if wins_row else 0
     global_total = int(total_row[0]) if total_row else 0
     global_pct = f"{(global_wins / global_total) * 100:.1f}%" if global_total > 0 else "0.0%"
+    conn.close()
+    return global_wins, global_total, global_pct
+
+def get_weekly_summary_stats():
+    """Aggregates active performance data for the weekly recap broadcast."""
+    wins, total, pct = get_accuracy_metrics()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     
-    # 2. Count active structural triggers initialized over the last 7 days
     seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute("SELECT COUNT(*) FROM earnings_predictions WHERE timestamp >= ?", (seven_days_ago,))
-    weekly_alerts_count = cursor.fetchone()[0] or 0
+    weekly_alerts = cursor.fetchone()[0] or 0
     
-    # 3. Fetch the latest evaluated corporate target as placeholder for weekly highlight
     cursor.execute("SELECT ticker FROM earnings_predictions WHERE is_evaluated = 1 ORDER BY timestamp DESC LIMIT 1")
-    top_ticker_row = cursor.fetchone()
-    top_ticker = top_ticker_row[0] if top_ticker_row else "N/A"
-    
+    top_row = cursor.fetchone()
+    top_ticker = top_row[0] if top_row else "N/A"
     conn.close()
     
     return {
-        "global_wins": global_wins,
-        "global_total": global_total,
-        "global_pct": global_pct,
-        "weekly_alerts": weekly_alerts_count,
+        "global_wins": wins,
+        "global_total": total,
+        "global_pct": pct,
+        "weekly_alerts": weekly_alerts,
         "top_ticker": top_ticker
     }

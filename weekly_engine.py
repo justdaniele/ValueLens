@@ -3,9 +3,16 @@ import logging
 from database import get_weekly_summary_stats
 from earnings_engine import send_alert_to_channel
 
-# Configure standalone logger for tracking weekly operations
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] WeeklyEngine: %(message)s")
+# Fix: Use the logger directly without re-configuring the global logging system.
+# The global configuration is handled exclusively by bot.py.
 logger = logging.getLogger("WeeklyEngine")
+
+def generate_and_broadcast_weekly_recap():
+    """
+    Compiles database metrics into dedicated English and Italian HTML briefs,
+    broadcasting them asynchronously to target distribution channels.
+    """
+    logger.info("Initializing institutional Weekly Performance Recap pipeline...")
 
 def generate_and_broadcast_weekly_recap():
     """
