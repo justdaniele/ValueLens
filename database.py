@@ -148,7 +148,10 @@ def evaluate_historical_accuracy_loop():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, ticker, price_at_signal, prediction FROM earnings_predictions WHERE is_evaluated = 0")
+    cursor.execute(
+        "SELECT id, ticker, price_at_signal, prediction FROM earnings_predictions "
+        "WHERE is_evaluated = 0 AND timestamp <= datetime('now', '-24 hours')"
+    )
     pending = cursor.fetchall()
     
     if not pending:

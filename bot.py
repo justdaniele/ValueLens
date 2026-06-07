@@ -94,16 +94,9 @@ async def incoming_commands_polling_loop():
                         "Private system."
                     )
 
-                    await asyncio.to_thread(
-                        lambda: requests.post(
-                            send_url,
-                            json={
-                                "chat_id": chat_id,
-                                "text": public_msg,
-                                "parse_mode": "HTML"
-                            }
-                        )
-                    )
+                    def _send_public(c=chat_id, m=public_msg):
+                        requests.post(send_url, json={"chat_id": c, "text": m, "parse_mode": "HTML"})
+                    await asyncio.to_thread(_send_public)
                     continue
 
                 if text.startswith("/"):
@@ -125,18 +118,12 @@ async def incoming_commands_polling_loop():
                         )
 
                     if reply:
-                        await asyncio.to_thread(
-                            lambda: requests.post(
-                                send_url,
-                                json={
-                                    "chat_id": chat_id,
-                                    "text": reply,
-                                    "parse_mode": "HTML"
-                                }
-                            )
-                        )
+                        def _send_reply(c=chat_id, r=reply):
+                            requests.post(send_url, json={"chat_id": c, "text": r, "parse_mode": "HTML"})
+                        await asyncio.to_thread(_send_reply)
 
         except Exception as e:
+            logger.error(f"Error in polling loop: {e}")
             await asyncio.sleep(5)
 
 
@@ -157,6 +144,12 @@ async def core_scheduler_loop():
                 await wait_until(9, 0)
                 await asyncio.to_thread(generate_and_broadcast_weekly_recap)
                 await asyncio.sleep(3600)
+                continue
+
+            # --- SUNDAY: no operations, sleep until Monday 08:00 ---
+            if today.weekday() == 6:
+                logger.info("Sunday detected — no scheduled operations. Sleeping until Monday 08:00.")
+                await wait_until(8, 0)
                 continue
 
             # --- OPERATIONAL WEEKDAY ROUTINE TIMELINE ---
