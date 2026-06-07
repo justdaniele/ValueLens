@@ -13,7 +13,6 @@ from database import DB_NAME, init_db
 
 load_dotenv()
 
-# File and Console Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -162,9 +161,8 @@ def broadcast_to_channel(text, channel_id):
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     
-    # Elegant Native Trick: Escape everything first to neutralize dangerous symbols (&, <, >)
+    # Native Safeguard: Protect structural styling markers from breaking on special symbols like & or <
     safe_text = html.escape(text, quote=False)
-    # Restore ONLY the strict intentional formatting tags back to normal
     safe_text = safe_text.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
     safe_text = safe_text.replace("&lt;i&gt;", "<i>").replace("&lt;/i&gt;", "</i>")
     
@@ -299,7 +297,6 @@ def execute_nightly_routine():
     logger.info("Phase 3: Triggering Dual-Language Generative AI Analysis & DB Commit...")
     
     for ticker in total_candidates:
-        # Fetch fresh comprehensive info object to pass into the AI layer for data grounding
         try:
             stock = yf.Ticker(ticker)
             info = stock.info

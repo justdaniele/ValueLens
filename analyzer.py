@@ -9,7 +9,6 @@ logger = logging.getLogger("ValueLensAnalyzer")
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
-# Initialize the OpenAI client pointing to DeepSeek infrastructure
 if DEEPSEEK_API_KEY:
     ai_client = OpenAI(
         api_key=DEEPSEEK_API_KEY,
@@ -19,68 +18,70 @@ else:
     ai_client = None
     logger.warning("DEEPSEEK_API_KEY missing. AI generation will be unavailable.")
 
-# --- CENTRALIZED SYSTEM PROMPT (ROBUST HTML OUTPUT) ---
-ANALYSIS_SYSTEM_PROMPT = """You are ValueLens, an elite quantitative hedge fund analyst writing daily intelligence briefings.
+# --- ULTRACLOSE SYSTEM PROMPT (NO RAW BR TAGS, COLD QUANT DATA) ---
+ANALYSIS_SYSTEM_PROMPT = """You are ValueLens, an elite quantitative hedge fund analyst writing ultra-concise daily intelligence briefings for mobile terminals.
 
-STRICT FORMATTING RULES:
-- Use ONLY standard HTML tags for formatting: <b>bold</b>, <i>italic</i>, <code>code</code>.
-- NEVER use Markdown syntax like **bold**, __underscores__, or backticks.
-- Separate physical sections cleanly using double line breaks.
-- Be extremely concise, highly cynical, and purely data-driven. Detect financial smoke and mirrors.
+STRICT FORMATTING & STYLE RULES:
+- Use ONLY <b>bold</b> and <i>italic</i> HTML tags for layout emphasis.
+- NEVER write the literal strings "<br>", "<br/>" or "\\n" in text. Use standard clean double line breaks (newlines) for spacing.
+- NEVER use Markdown syntax (asterisks **, underscores __, or backticks).
+- Bullet points must use exactly the bullet glyph "•".
+- Be brutally concise, cynical, and data-driven. Limit each analytical dimension to maximum 1-2 sharp, dense sentences. Zero fluff allowed.
 """
 
 def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_info: dict = None) -> str:
     """
-    Generates a high-conviction financial analysis report grounded in real-time market data.
-    Communicates via DeepSeek Chat Completion API.
+    Generates an institutional-grade, highly-compact financial flash report.
+    Grounded strictly in real-time market data to prevent hallucinations.
     """
     if not ai_client:
         return f"<b>[ {ticker} ]</b> Analysis aborted: DeepSeek API Client uninitialized."
 
-    # Process and ground real-time quantitative metrics to eliminate AI hallucinations
-    financial_context = ""
+    # Extract clean baseline numbers
+    current_price = "N/A"
+    target_mean = "N/A"
+    trailing_pe = "N/A"
+    price_to_book = "N/A"
+    discount_pct = "0.0%"
+
     if company_info and isinstance(company_info, dict):
-        current_price = company_info.get("currentPrice") or company_info.get("regularMarketPrice") or "N/A"
-        target_mean = company_info.get("targetMeanPrice") or "N/A"
-        trailing_pe = company_info.get("trailingPE") or company_info.get("forwardPE") or "N/A"
-        price_to_book = company_info.get("priceToBook") or "N/A"
-        market_cap = company_info.get("marketCap") or 0
+        c_val = company_info.get("currentPrice") or company_info.get("regularMarketPrice")
+        t_val = company_info.get("targetMeanPrice")
+        pe_val = company_info.get("trailingPE") or company_info.get("forwardPE")
+        pb_val = company_info.get("priceToBook")
         
-        market_cap_formatted = f"${market_cap:,}" if market_cap else "N/A"
+        current_price = f"${c_val:,.2f}" if c_val else "N/A"
+        target_mean = f"${t_val:,.2f}" if t_val else "N/A"
+        trailing_pe = f"{pe_val:.2f}x" if pe_val else "N/A"
+        price_to_book = f"{pb_val:.2f}x" if pb_val else "N/A"
         
-        financial_context = f"""
-CRITICAL REAL-TIME MARKET DATA FOR CURRENT SESSION (MUST USE THESE EXACT NUMBERS):
-- Current Market Price: ${current_price}
-- Analyst Target Mean Price: ${target_mean}
-- Valuation Multiplier (P/E Ratio): {trailing_pe}
-- Price to Book (P/B Value): {price_to_book}
-- Market Capitalization Size: {market_cap_formatted}
-"""
+        if c_val and t_val and t_val > 0:
+            discount_pct = f"{((t_val - c_val) / t_val) * 100:.1f}%"
 
-    mode_instruction = (
-        "Perform an advanced institutional-grade deep dive." 
-        if mode == "PRO" else 
-        "Generate a high-level concise FLASH validation assessment."
-    )
-    
-    language_instruction = (
-        "Write the entire report response in Italian." 
-        if lang == "it" else 
-        "Write the entire report response in English."
-    )
+    mode_instruction = "institutional elite flash dive" if mode == "PRO" else "concise summary briefing"
+    language_instruction = "Write the response entirely in Italian." if lang == "it" else "Write the response entirely in English."
 
-    user_prompt = f"""Analyze target asset: {ticker}
-Configuration Mode: {mode_instruction}
-Output Language: {language_instruction}
-{financial_context}
+    user_prompt = f"""Target Ticker: {ticker}
+Configuration: {mode_instruction}
+Language: {language_instruction}
 
-Incorporate these exact analytical dimensions in your final HTML layout:
-1. <b>Price Context</b>: Current market price versus calculated intrinsic terminal value. Mention the exact real market data supplied.
-2. <b>Reverse DCF Stress-Test</b>: What implied cash flow growth rate is embedded within current valuations? Is it realistic?
-3. <b>Zombie Detector</b>: Verify cash conversion efficiency. Does Operating Cash Flow fundamentally back stated Net Income?
-4. <b>ValueLens Verdict</b>: Direct, cynical final assessment. Is this an authentic equity discount or a classic value trap?
+REAL-TIME FINANCIAL METRICS:
+- Price: {current_price}
+- Target: {target_mean} (Discount Room: {discount_pct})
+- P/E Multiplier: {trailing_pe}
+- P/B Value: {price_to_book}
 
-Structure the response clean and readable using only <b>, <i>, and line breaks. Do not include raw markdown wrappers.
+Generate the brief following this EXACT structure template. Replace bracketed guidelines with maximum 1-2 brutal sentences:
+
+📊 <b>Price Context</b>: [1-2 sentences verifying the {current_price} price relative to the {target_mean} target and {trailing_pe} multiplier. State if the discount room of {discount_pct} is a real opportunity or a trap.]
+
+📉 <b>Reverse DCF Stress-Test</b>: [1-2 sentences maximum detailing what growth rate the current valuation embeds and if it is realistic.]
+
+🛡️ <b>Zombie Detector</b>: [1-2 sentences checking cash conversion quality and verifying if operating cash flow supports reported net income.]
+
+🚨 <b>ValueLens Verdict</b>: [1 single high-impact, cynical sentence stating if this asset is an authentic equity discount or a deadly value trap.]
+
+Strict constraint: Keep it short, bulleted, and heavily punchy. Do not output raw markdown code blocks.
 """
 
     try:
@@ -90,8 +91,8 @@ Structure the response clean and readable using only <b>, <i>, and line breaks. 
                 {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.2,
-            max_tokens=900
+            temperature=0.1,
+            max_tokens=500
         )
         return response.choices[0].message.content.strip()
         
@@ -100,19 +101,14 @@ Structure the response clean and readable using only <b>, <i>, and line breaks. 
         return f"⚠️ <b>Analysis Engine Timeout</b>: Unable to compile data layers for {ticker} at this time."
 
 def generate_earnings_sentiment_layer(ticker: str, company_name: str) -> int:
-    """
-    Analyzes systemic sentiment positioning 48h prior to an earnings release.
-    Returns a directional score multiplier ranging from -40 to +40.
-    """
+    """Analyzes short-term sentiment risk profile 48h prior to earnings."""
     if not ai_client:
         return 0
 
-    prompt = f"""Analyze the short-term forward-looking risk profile for {company_name} ({ticker}) ahead of their upcoming earnings release.
-Return a single integer score strictly between -40 (extremely bearish expectations, guidance downside risk) and +40 (extremely bullish positioning, high probability of surprise).
-
-CRITICAL: Your response must contain ONLY the raw number. Do not include words, symbols, explanation or punctuation.
+    prompt = f"""Analyze the forward-looking risk profile for {company_name} ({ticker}) ahead of earnings.
+Return a single integer score strictly between -40 (bearish) and +40 (bullish).
+CRITICAL: Your response must contain ONLY the raw number. No words, punctuation or markdown.
 """
-
     try:
         response = ai_client.chat.completions.create(
             model="deepseek-chat",
@@ -127,5 +123,5 @@ CRITICAL: Your response must contain ONLY the raw number. Do not include words, 
         score = int(''.join(c for c in raw_result if c.isdigit() or c == '-'))
         return min(max(score, -40), 40)
     except Exception as e:
-        logger.warning(f"Could not compute AI sentiment modifier for {ticker}: {e}. Defaulting to neutral (0).")
+        logger.warning(f"Could not compute AI sentiment modifier for {ticker}: {e}. Defaulting to 0.")
         return 0
