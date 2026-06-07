@@ -8,7 +8,7 @@ import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 from analyzer import analyze_company
-from database import DB_NAME
+from database import DB_NAME, init_db
 
 load_dotenv()
 
@@ -251,6 +251,9 @@ def save_report_to_db(ticker, report_text, lang):
 
 def execute_nightly_routine():
     """Main orchestrator execution loop handling the bilingual nightly screening funnel."""
+    # Ensure database structures and core tables are fully initialized prior to autonomous routine
+    init_db()
+
     logger.info("="*60)
     logger.info("Starting ValueLens Bilingual Nightly Routine (Scanner + Analyzer)")
     logger.info("="*60)
