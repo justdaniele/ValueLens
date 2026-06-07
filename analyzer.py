@@ -98,7 +98,8 @@ def generate_earnings_sentiment_layer(ticker: str, company_name: str) -> int:
         response = ai_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "You are a quantitative data endpoint. Output only raw integers."},\n                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are a quantitative data endpoint. Output only raw integers."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.1,
             max_tokens=10
