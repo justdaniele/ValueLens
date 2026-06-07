@@ -34,7 +34,6 @@ def get_sp500_tickers():
     cache_file = "sp500_tickers.txt"
     cache_expiry_days = 7
     
-    # Check if local cache file exists and is fresh
     if os.path.exists(cache_file):
         file_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
         if datetime.datetime.now() - file_time < datetime.timedelta(days=cache_expiry_days):
@@ -42,7 +41,6 @@ def get_sp500_tickers():
             with open(cache_file, "r") as f:
                 return [line.strip() for line in f.readlines() if line.strip()]
 
-    # Cache expired or missing -> Pull fresh data from Wikipedia
     logger.info("Cache missing or expired. Syncing fresh S&P 500 roster from Wikipedia...")
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
@@ -56,7 +54,6 @@ def get_sp500_tickers():
         tickers = table['Symbol'].tolist()
         tickers = [t.replace('.', '-') for t in tickers]
         
-        # Persist roster to local disk for subsequent runs
         with open(cache_file, "w") as f:
             for ticker in tickers:
                 f.write(f"{ticker}\n")
@@ -65,7 +62,6 @@ def get_sp500_tickers():
         return tickers
     except Exception as e:
         logger.error(f"Error downloading S&P 500 list: {e}")
-        # Emergency fallback: return expired cache if available rather than crashing
         if os.path.exists(cache_file):
             logger.warning("Returning expired cache file as emergency operational fallback.")
             with open(cache_file, "r") as f:
@@ -77,80 +73,69 @@ def get_us_market_universe():
     sp500 = get_sp500_tickers()
     return sp500, []
 
-# ── VALUE UNIVERSE FILTER (Optimized with Session + Fast Sleep) ───────────────
+# ── VALUE UNIVERSE FILTER (Native Speed & Discount Sorting) ───────────────────
 
-def filter_value_universe(tickers, session, max_candidates=150, sleep_seconds=0.2,
-                          pe_threshold=20):
-    """Filters S&P 500 tickers leveraging a shared HTTP session and fast cooldown safety buffers."""
+def filter_value_universe(tickers, max_candidates=150, sleep_seconds=0.05):
+    """Screens the S&P 500 using native fast_info, sorting by deep year discount."""
     candidates = []
     for i, ticker in enumerate(tickers):
         if i % 100 == 0 and i > 0:
             logger.info(f"Filter progress: {i}/{len(tickers)} tickers...")
         try:
-            # Pass the persistent session into yfinance to maintain Keep-Alive connections
-            stock = yf.Ticker(ticker, session=session)
-            f_info = stock.fast_info
-            
-            trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
-            
-            if trailing_pe is not None and trailing_pe > pe_threshold:
-                continue
-            candidates.append(ticker)
-        except Exception as e:
-            logger.debug(f"Skip {ticker} during filter: {e}")
-        time.sleep(sleep_seconds)
-    logger.info(f"Filtered Value Universe size: {len(candidates)} tickers.")
-    return candidates[:max_candidates]
-
-# ── FAST SCREEN (Optimized with Session + Fast Sleep) ─────────────────────────
-
-def fast_value_screen(tickers_list, session, max_candidates=20, sleep_seconds=0.2,
-                      pe_threshold=20):
-    """Pre‑filters using shared session fast_info to sort by deep discount."""
-    candidates = []
-    for i, ticker in enumerate(tickers_list):
-        if i % 50 == 0 and i > 0:
-            logger.info(f"Fast‑screen progress: {i}/{len(tickers_list)} tickers...")
-        try:
-            stock = yf.Ticker(ticker, session=session)
+            stock = yf.Ticker(ticker)
             f_info = stock.fast_info
             
             high = getattr(f_info, 'year_high', None) or getattr(f_info, 'yearHigh', None)
             current = getattr(f_info, 'last_price', None) or getattr(f_info, 'lastPrice', None)
-            trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
             
             if high and current:
-                if trailing_pe is not None and trailing_pe > pe_threshold:
-                    continue
                 discount = (high - current) / high
                 candidates.append({
                     "ticker": ticker,
-                    "discount": discount,
-                    "trailing_pe": trailing_pe
+                    "discount": discount
                 })
         except Exception as e:
-            logger.debug(f"Skip {ticker} during fast screen: {e}")
+            logger.debug(f"Skip {ticker} during filter parse: {e}")
         time.sleep(sleep_seconds)
         
+    # Sort the entire index by deepest discount from 52-week highs
     candidates.sort(key=lambda x: x['discount'], reverse=True)
     top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
+    
+    logger.info(f"Filtered Value Universe size: {len(top_tickers)} tickers sorted by discount.")
+    return top_tickers
+
+# ── FAST SCREEN (Lightweight Extraction) ──────────────────────────────────────
+
+def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=0.05):
+    """Extracts the top structural candidates from the filtered value pool."""
+    # Since filter_value_universe already sorted by discount, we select the top cut safely
+    top_tickers = tickers_list[:max_candidates]
     logger.info(f"Fast‑screen top candidates: {top_tickers}")
     return top_tickers
 
-# ── DEEP SCREEN (Full stock.info - Kept at 15s for high-weight data) ───────────
+# ── DEEP SCREEN (Full stock.info + Strict PE/Fundamentals Filtering) ──────────
 
-def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15):
-    """Second‑pass structural filter using full stock.info sorted by analyst upside."""
+def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15, pe_threshold=20):
+    """Second‑pass comprehensive filter validating real P/E and Analyst Upside."""
     candidates = []
     for ticker in tickers_list:
         try:
+            logger.info(f"Fetching deep fundamentals for corporate target: {ticker}...")
             stock = yf.Ticker(ticker)
             info = stock.info
+            
             current = info.get("currentPrice") or info.get("regularMarketPrice")
             target_mean = info.get("targetMeanPrice")
             pe = info.get("trailingPE") or info.get("forwardPE")
             pb = info.get("priceToBook")
             market_cap = info.get("marketCap", 0)
+            
+            # Real Fundamental Filtering (PE Threshold checked here where data exists)
+            if pe is not None and pe > pe_threshold:
+                logger.info(f"Rejected {ticker}: P/E ratio ({pe}) above threshold.")
+                continue
+                
             if current and target_mean and market_cap > 10e9:
                 upside = (target_mean - current) / current
                 candidates.append({
@@ -161,11 +146,12 @@ def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15):
                     "market_cap": market_cap
                 })
         except Exception as e:
-            logger.debug(f"Skip {ticker} during deep screen: {e}")
+            logger.warning(f"Skip structural lookup for {ticker} during deep screen: {e}")
         time.sleep(sleep_seconds)
+        
     candidates.sort(key=lambda x: x['upside'], reverse=True)
     top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
-    logger.info(f"Deep‑screen top candidates: {top_tickers}")
+    logger.info(f"Deep‑screen final winners: {top_tickers}")
     return top_tickers
 
 # ── TELEGRAM LOGIC ────────────────────────────────────────────────────────────
@@ -278,26 +264,17 @@ def execute_nightly_routine():
         logger.error("Failed retrieving S&P 500 baseline indices.")
         return
     
-    # Initialize a secure and persistent HTTP connection pool for Phase 0 and Phase 1
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
-    
-    logger.info("Phase 0: Filtering value universe from S&P 500 (Session-optimized sleep 0.2s)...")
-    value_universe = filter_value_universe(sp500, session=session, max_candidates=150, sleep_seconds=0.2)
+    logger.info("Phase 0: Filtering value universe from S&P 500 (Native performance sleep 0.05s)...")
+    value_universe = filter_value_universe(sp500, max_candidates=150, sleep_seconds=0.05)
     if not value_universe:
         logger.info("No value targets matched baseline criteria.")
         return
     
-    logger.info("Phase 1: Launching Fast Price Screening (Session-optimized sleep 0.2s)...")
-    fast_candidates = fast_value_screen(value_universe, session=session, max_candidates=20, sleep_seconds=0.2)
+    logger.info("Phase 1: Launching Fast Price Screening...")
+    fast_candidates = fast_value_screen(value_universe, max_candidates=20, sleep_seconds=0.05)
     if not fast_candidates:
         logger.info("No assets survived the fast screening pass.")
         return
-    
-    # Close the session context to free up hardware resources before the deep pass
-    session.close()
     
     logger.info(f"Phase 2: Initiating Deep Fundamentals Screen on {len(fast_candidates)} candidates (sleep 15s)...")
     total_candidates = deep_value_screen(fast_candidates, max_candidates=15, sleep_seconds=15)
@@ -309,7 +286,6 @@ def execute_nightly_routine():
     logger.info("Phase 3: Triggering Dual-Language Generative AI Analysis & DB Commit...")
     
     for ticker in total_candidates:
-        # 1. Generate and save the report IN ENGLISH
         try:
             logger.info(f"Generating EN report for target: {ticker}...")
             report_en = analyze_company(ticker, mode="PRO", lang="en")
@@ -318,7 +294,6 @@ def execute_nightly_routine():
         except Exception as e:
             logger.error(f"Deep analytical call EN failed for target {ticker}: {e}")
 
-        # 2. Generate and save the report IN ITALIAN
         try:
             logger.info(f"Generating IT report for target: {ticker}...")
             report_it = analyze_company(ticker, mode="PRO", lang="it")
