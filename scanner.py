@@ -196,7 +196,7 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
             pe          = info.get("trailingPE") or info.get("forwardPE")
 
             if pe is not None and pe > pe_threshold:
-                logger.info(f"Rejected {ticker}: P/E {pe:.1f} > {pe_threshold}.")
+                logger.info(f"Rejected {ticker}: P/E {pe} > {pe_threshold}.")
                 continue
 
             if current and target_mean and current > 0:

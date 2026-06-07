@@ -50,7 +50,8 @@ async def incoming_commands_polling_loop():
 
     if not admin_id_str:
         logger.error("CRITICAL: ADMIN_TELEGRAM_ID missing.")
-        return
+        while True:
+            await asyncio.sleep(60)
 
     admin_id = int(admin_id_str)
     offset = 0
