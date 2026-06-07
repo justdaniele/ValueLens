@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import datetime
+import requests
 from dotenv import load_dotenv
 
 # Import autonomous tasks, database utilities, and multi-lingual distribution networks
@@ -35,6 +36,127 @@ async def wait_until(hour: int, minute: int):
     logger.info(f"Next operational run scheduled for {target}. Sleeping for {sleep_seconds:.2f} seconds.")
     await asyncio.sleep(sleep_seconds)
 
+# ── INTERACTIVE COMMANDS & SECURITY GATEKEEPER LOOP ───────────────────────────
+
+async def incoming_commands_polling_loop():
+    """
+    Asynchronous background task executing standard long-polling intervals.
+    Enforces the administrative security barrier and processes private commands.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    admin_id_str = os.environ.get("ADMIN_TELEGRAM_ID", "0")
+    
+    try:
+        admin_id = int(admin_id_str)
+    except ValueError:
+        admin_id = 0
+
+    if not bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN missing from environment. Command listener disabled.")
+        return
+
+    offset = 0
+    updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    logger.info("Interactive Telegram command long-polling listener successfully initialized.")
+
+    while True:
+        try:
+            # Safely delegate the blocking network request to an asynchronous thread pool
+            def fetch_updates():
+                try:
+                    r = requests.get(updates_url, json={"offset": offset, "timeout": 20}, timeout=25)
+                    return r.json() if r.status_code == 200 else None
+                except Exception:
+                    return None
+
+            response_data = await asyncio.to_thread(fetch_updates)
+            if not response_data or not response_data.get("ok"):
+                await asyncio.sleep(3)
+                continue
+
+            for update in response_data.get("result", []):
+                offset = update["update_id"] + 1
+                message = update.get("message")
+                
+                # Filter payloads ensuring we only handle plain text direct messages
+                if not message or "text" not in message:
+                    continue
+
+                chat_id = message["chat"]["id"]
+                user_id = message["from"]["id"]
+                text = message["text"].strip()
+
+                # --- EXCLUSIVE GATEKEEPER SECURITY SHIELD ---
+                if user_id != admin_id:
+                    logger.warning(f"Unauthorized administrative control attempt intercepted from User ID: {user_id}")
+                    
+                    # Strictly respond in English, denying access while promoting public channel redirection links
+                    unauthorized_redirect_payload = (
+                        "🤖 <b>ValueLens Intelligence Terminal</b>\n\n"
+                        "This automated bot is a private infrastructure reserved exclusively for internal administrative control.\n\n"
+                        "If you want to access our daily quantitative equity briefings, stock screening funnels, and market insights, "
+                        "please join our official public channels:\n\n"
+                        "🇬🇧 <b>English Broadcast Feed</b>: https://t.me/valuelensintelligence\n"
+                        "🇮🇹 <b>Italian Broadcast Feed</b>: https://t.me/valuelensintelligenceit\n\n"
+                        "<i>Thank you for your interest in ValueLens.</i>"
+                    )
+                    
+                    def dispatch_rejection():
+                        requests.post(send_url, json={
+                            "chat_id": chat_id,
+                            "text": unauthorized_redirect_payload,
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": True
+                        }, timeout=15)
+                        
+                    await asyncio.to_thread(dispatch_rejection)
+                    continue
+
+                # --- AUTHORIZED ADMINISTRATIVE ROUTING SCHEMAS ---
+                if text.startswith("/"):
+                    command = text.split()[0].lower()
+                    reply_payload = ""
+
+                    if command == "/accuracy":
+                        wins, total, pct = get_accuracy_metrics()
+                        reply_payload = (
+                            f"📊 <b>ValueLens Private Accuracy Ledger</b>\n\n"
+                            f"• Total Evaluated Targets: <code>{total}</code>\n"
+                            f"• Confirmed Core Wins: <code>{wins}</code>\n"
+                            f"• Systematic Win Ratio: <b>{pct}</b>"
+                        )
+                    elif command == "/status":
+                        reply_payload = (
+                            "🟢 <b>ValueLens Core Operational Health</b>\n\n"
+                            "• Master Scheduler Loop: <code>ACTIVE</code>\n"
+                            "• Database Ledger State: <code>SYNCHRONIZED</code>\n"
+                            "• Security Matrix Filter: <code>ENFORCED</code>"
+                        )
+                    elif command == "/portfolio":
+                        reply_payload = (
+                            "💼 <b>ValueLens Administrative Holdings</b>\n\n"
+                            "Quantitative equity structures are securely recorded inside the local disk database layer."
+                        )
+                    else:
+                        reply_payload = "❓ <b>Unknown Parameter</b>\nUse: /accuracy, /status, or /portfolio"
+
+                    if reply_payload:
+                        def dispatch_admin_reply():
+                            requests.post(send_url, json={
+                                "chat_id": chat_id,
+                                "text": reply_payload,
+                                "parse_mode": "HTML"
+                            }, timeout=15)
+                        await asyncio.to_thread(dispatch_admin_reply)
+
+        except Exception as e:
+            logger.error(f"Error encountered inside update consumer loop: {e}")
+            await asyncio.sleep(5)
+
+# ── CENTRAL BACKGROUND TIME SCHEDULER LOOP ────────────────────────────────────
+
 async def core_scheduler_loop():
     logger.info("=" * 60)
     logger.info("ValueLens Autonomous Background Engine successfully initialized.")
@@ -42,7 +164,6 @@ async def core_scheduler_loop():
     
     while True:
         try:
-            # Capture real-time hardware calendar state
             today = datetime.datetime.now()
             
             # --- WEEKEND INTERVAL OPERATION (Saturday Recap Routing) ---
@@ -52,7 +173,6 @@ async def core_scheduler_loop():
                 await asyncio.to_thread(generate_and_broadcast_weekly_recap)
                 logger.info("✅ Weekly Performance Recap broadcast complete. Suspending to sleep cycle.")
                 
-                # Cooldown period buffer to avoid rapid double-triggering inside the execution minute
                 await asyncio.sleep(3600)
                 continue
             
@@ -96,14 +216,17 @@ async def core_scheduler_loop():
             
         except Exception as e:
             logger.error(f"Critical error caught inside Master Scheduler loop: {e}")
-            await asyncio.sleep(60)  # Standard circuit-breaker safety delay to prevent loop panics
+            await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    # Validate and initialize dynamic database schemas
+    # Validate and initialize dynamic database schemas prior to boot
     init_db()
     
-    # Initialize main infinite background core engine loop
+    # Fire up both the background scheduler and interactive command parser concurrently
     try:
-        asyncio.run(core_scheduler_loop())
+        asyncio.run(asyncio.gather(
+            core_scheduler_loop(),
+            incoming_commands_polling_loop()
+        ))
     except KeyboardInterrupt:
         logger.info("Controlled hardware shutdown of Master Engine requested by user.")
