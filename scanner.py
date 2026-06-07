@@ -27,29 +27,49 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
 CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
 
-# ── S&P 500 TICKERS (From Wikipedia) ──────────────────────────────────────────
+# ── S&P 500 TICKERS WITH LOCAL CACHING (7 Days Expiry) ────────────────────────
 
 def get_sp500_tickers():
-    """Downloads the S&P 500 ticker list from Wikipedia with a spoofed User-Agent."""
-    logger.info("Downloading S&P 500 list from Wikipedia...")
+    """Retrieves S&P 500 tickers from local cache, updating from Wikipedia once every 7 days."""
+    cache_file = "sp500_tickers.txt"
+    cache_expiry_days = 7
+    
+    # Check if local cache file exists and is fresh
+    if os.path.exists(cache_file):
+        file_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
+        if datetime.datetime.now() - file_time < datetime.timedelta(days=cache_expiry_days):
+            logger.info("Loading S&P 500 universe from local storage cache.")
+            with open(cache_file, "r") as f:
+                return [line.strip() for line in f.readlines() if line.strip()]
+
+    # Cache expired or missing -> Pull fresh data from Wikipedia
+    logger.info("Cache missing or expired. Syncing fresh S&P 500 roster from Wikipedia...")
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        # Custom headers to bypass Wikipedia's strict bot-blocking parameters
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        # Fetch raw HTML page content first
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
-        # Parse the plain text source through pandas
         table = pd.read_html(response.text)[0]
         tickers = table['Symbol'].tolist()
         tickers = [t.replace('.', '-') for t in tickers]
-        logger.info(f"Found {len(tickers)} S&P 500 tickers.")
+        
+        # Persist roster to local disk for subsequent runs
+        with open(cache_file, "w") as f:
+            for ticker in tickers:
+                f.write(f"{ticker}\n")
+                
+        logger.info(f"Successfully synchronized and cached {len(tickers)} tickers locally.")
         return tickers
     except Exception as e:
         logger.error(f"Error downloading S&P 500 list: {e}")
+        # Emergency fallback: return expired cache if available rather than crashing
+        if os.path.exists(cache_file):
+            logger.warning("Returning expired cache file as emergency operational fallback.")
+            with open(cache_file, "r") as f:
+                return [line.strip() for line in f.readlines()]
         return []
 
 def get_us_market_universe():
@@ -57,20 +77,20 @@ def get_us_market_universe():
     sp500 = get_sp500_tickers()
     return sp500, []
 
-# ── VALUE UNIVERSE FILTER (From S&P 500) ──────────────────────────────────────
+# ── VALUE UNIVERSE FILTER (Optimized with Session + Fast Sleep) ───────────────
 
-def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
+def filter_value_universe(tickers, session, max_candidates=150, sleep_seconds=0.2,
                           pe_threshold=20):
-    """Filters S&P 500 tickers to extract a preliminary value universe."""
+    """Filters S&P 500 tickers leveraging a shared HTTP session and fast cooldown safety buffers."""
     candidates = []
     for i, ticker in enumerate(tickers):
-        if i % 50 == 0 and i > 0:
+        if i % 100 == 0 and i > 0:
             logger.info(f"Filter progress: {i}/{len(tickers)} tickers...")
         try:
-            stock = yf.Ticker(ticker)
+            # Pass the persistent session into yfinance to maintain Keep-Alive connections
+            stock = yf.Ticker(ticker, session=session)
             f_info = stock.fast_info
             
-            # Dual-lookup fallback handling both modern snake_case and older camelCase
             trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
             
             if trailing_pe is not None and trailing_pe > pe_threshold:
@@ -82,20 +102,19 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
     logger.info(f"Filtered Value Universe size: {len(candidates)} tickers.")
     return candidates[:max_candidates]
 
-# ── FAST SCREEN (Lightweight fast_info) ───────────────────────────────────────
+# ── FAST SCREEN (Optimized with Session + Fast Sleep) ─────────────────────────
 
-def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
+def fast_value_screen(tickers_list, session, max_candidates=20, sleep_seconds=0.2,
                       pe_threshold=20):
-    """Pre‑filters using yfinance fast_info to sort by deep discount."""
+    """Pre‑filters using shared session fast_info to sort by deep discount."""
     candidates = []
     for i, ticker in enumerate(tickers_list):
         if i % 50 == 0 and i > 0:
             logger.info(f"Fast‑screen progress: {i}/{len(tickers_list)} tickers...")
         try:
-            stock = yf.Ticker(ticker)
+            stock = yf.Ticker(ticker, session=session)
             f_info = stock.fast_info
             
-            # Dual-lookup fallback handling both modern snake_case and older camelCase
             high = getattr(f_info, 'year_high', None) or getattr(f_info, 'yearHigh', None)
             current = getattr(f_info, 'last_price', None) or getattr(f_info, 'lastPrice', None)
             trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
@@ -118,7 +137,7 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
     logger.info(f"Fast‑screen top candidates: {top_tickers}")
     return top_tickers
 
-# ── DEEP SCREEN (Full stock.info) ─────────────────────────────────────────────
+# ── DEEP SCREEN (Full stock.info - Kept at 15s for high-weight data) ───────────
 
 def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15):
     """Second‑pass structural filter using full stock.info sorted by analyst upside."""
@@ -173,7 +192,7 @@ def broadcast_to_channel(text, channel_id):
             r.raise_for_status()
             time.sleep(1)
         except Exception as e:
-            logger.error(f"Telegram dispatch failed: {e} | Response: {r.text if 'r' in dir() else 'N/A'}")
+            logger.error(f"Telegram dispatch failed: {e}")
             success_all = False
             
     return success_all
@@ -185,7 +204,6 @@ def morning_broadcast():
     cursor = conn.cursor()
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # Target channels configuration mapped by destination language and headers
     channels_setup = [
         {"id": CHANNEL_ID_IT, "lang": "it", "header": "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Rilevati target altamente sottovalutati:</i>\n\n", "summary_tmpl": "🌅 Report Mattutino: inviati {} report in Italiano."},
         {"id": CHANNEL_ID_EN, "lang": "en", "header": "🌅 <b>ValueLens Morning Intelligence Report</b>\n\n<i>Highly undervalued targets detected:</i>\n\n", "summary_tmpl": "🌅 Morning Report: {} English reports sent."}
@@ -205,7 +223,6 @@ def morning_broadcast():
             logger.info(f"No pending reports found for language locale: {channel['lang']}")
             continue
             
-        # Send initial Channel Header
         broadcast_to_channel(channel["header"], channel["id"])
         
         for ticker, report_text in rows:
@@ -235,12 +252,10 @@ def save_report_to_db(ticker, report_text, lang):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        
         cursor.execute("""
             INSERT INTO nightly_reports (ticker, report_text, lang, status)
             VALUES (?, ?, ?, 'PENDING')
         """, (ticker, report_text, lang))
-        
         conn.commit()
         conn.close()
     except Exception as e:
@@ -254,7 +269,6 @@ def execute_nightly_routine():
     logger.info("Starting ValueLens Bilingual Nightly Routine (Scanner + Analyzer)")
     logger.info("="*60)
     
-    # DELETE THE HASHTAG AFTER THE TESTS
   #  if datetime.datetime.now().weekday() >= 5:
   #      logger.info("Weekend detected. Equity markets closed. Aborting execution routine.")
   #      return
@@ -264,17 +278,26 @@ def execute_nightly_routine():
         logger.error("Failed retrieving S&P 500 baseline indices.")
         return
     
-    logger.info("Phase 0: Filtering value universe from S&P 500 (sleep 3s)...")
-    value_universe = filter_value_universe(sp500, max_candidates=150, sleep_seconds=3)
+    # Initialize a secure and persistent HTTP connection pool for Phase 0 and Phase 1
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    
+    logger.info("Phase 0: Filtering value universe from S&P 500 (Session-optimized sleep 0.2s)...")
+    value_universe = filter_value_universe(sp500, session=session, max_candidates=150, sleep_seconds=0.2)
     if not value_universe:
         logger.info("No value targets matched baseline criteria.")
         return
     
-    logger.info("Phase 1: Launching Fast Price Screening (sleep 3s)...")
-    fast_candidates = fast_value_screen(value_universe, max_candidates=20, sleep_seconds=3)
+    logger.info("Phase 1: Launching Fast Price Screening (Session-optimized sleep 0.2s)...")
+    fast_candidates = fast_value_screen(value_universe, session=session, max_candidates=20, sleep_seconds=0.2)
     if not fast_candidates:
         logger.info("No assets survived the fast screening pass.")
         return
+    
+    # Close the session context to free up hardware resources before the deep pass
+    session.close()
     
     logger.info(f"Phase 2: Initiating Deep Fundamentals Screen on {len(fast_candidates)} candidates (sleep 15s)...")
     total_candidates = deep_value_screen(fast_candidates, max_candidates=15, sleep_seconds=15)
