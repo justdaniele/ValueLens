@@ -3,8 +3,7 @@ import time
 import logging
 import requests
 import html
-import asyncio
-from datetime import datetime, timedelta
+import datetime
 import yfinance as yf
 from analyzer import generate_earnings_sentiment_layer
 from database import save_earnings_prediction
@@ -15,6 +14,9 @@ logger = logging.getLogger("EarningsEngine")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
 CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
+
+# Minimum absolute EES score before a Sniper Alert is dispatched
+EES_FIRE_THRESHOLD = int(os.environ.get("EES_FIRE_THRESHOLD", "30"))
 
 def send_alert_to_channel(text_en: str, text_it: str = None):
     """Broadcasts localized alerts applying safety HTML escape matrices."""
@@ -44,34 +46,67 @@ async def run_earnings_pipeline():
     if not universe:
         return
 
-    # Simulated extraction of upcoming earnings (replace with actual calendar logic)
-    upcoming = universe[:3]  
+    today = datetime.date.today()
+    target_window_end = today + datetime.timedelta(days=3)
     
+    upcoming = []
+    
+    logger.info("Scanning universe for upcoming earnings within 72h window...")
+    for ticker in universe[:150]: # Scansiona i primi 150 titoli (Regola questo limite secondo necessità)
+        try:
+            stock = yf.Ticker(ticker)
+            calendar = stock.calendar
+            
+            if calendar and 'Earnings Date' in calendar:
+                dates = calendar['Earnings Date']
+                if dates and isinstance(dates, list) and len(dates) > 0:
+                    earnings_date = dates[0]
+                    
+                    # FIX: yfinance ora restituisce datetime.date direttamente.
+                    # Se fosse un Timestamp o datetime, estraiamo solo il `.date()`
+                    if hasattr(earnings_date, "date"): 
+                        earnings_date = earnings_date.date()
+                    
+                    if isinstance(earnings_date, datetime.date):
+                        if today <= earnings_date <= target_window_end:
+                            upcoming.append(ticker)
+                            logger.info(f"Catalyst found: {ticker} earnings on {earnings_date}")
+        except Exception as e:
+            pass
+        time.sleep(0.1)
+
+    if not upcoming:
+        logger.info("No upcoming earnings detected in the short-term window.")
+        return
+        
     for ticker in upcoming:
         try:
             stock = yf.Ticker(ticker)
             curr_price = stock.fast_info.last_price
-            quant_score = 10.5 
+            
+            quant_score = 10.5 # Default quant base score
             ai_score = generate_earnings_sentiment_layer(ticker, stock.info.get("shortName", ticker))
             final_ees = round(quant_score + ai_score)
             
-            save_earnings_prediction(ticker, curr_price, "BULLISH" if final_ees > 0 else "BEARISH")
+            direction = "BULLISH" if final_ees >= 0 else "BEARISH"
+            direction_it = "RIALZISTA" if final_ees >= 0 else "RIBASSISTA"
             
-            if abs(final_ees) >= 30:
-                direction_en = "BULLISH" if final_ees > 0 else "BEARISH"
-                direction_it = "RIALZISTA" if final_ees > 0 else "RIBASSISTA"
-                
+            save_earnings_prediction(ticker, curr_price, direction)
+            
+            if abs(final_ees) >= EES_FIRE_THRESHOLD:
                 msg_en = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"
                           f"Score: <b>{final_ees}</b>\n"
                           f"Quant: {round(quant_score)} | AI Sentiment: {ai_score}\n"
-                          f"Prediction: <b>{direction_en}</b>")
+                          f"Prediction: <b>{direction}</b>\n"
+                          f"Price at signal: <code>${curr_price:.2f}</code>")
                           
                 msg_it = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"
                           f"Punteggio: <b>{final_ees}</b>\n"
                           f"Quant: {round(quant_score)} | Sentiment AI: {ai_score}\n"
-                          f"Previsione: <b>{direction_it}</b>")
+                          f"Previsione: <b>{direction_it}</b>\n"
+                          f"Prezzo al segnale: <code>${curr_price:.2f}</code>")
                 
                 send_alert_to_channel(msg_en, msg_it)
                 time.sleep(2)
         except Exception as e:
-            logger.error(f"Error processing {ticker}: {e}")
+            logger.error(f"Error processing earnings analysis for {ticker}: {e}")
