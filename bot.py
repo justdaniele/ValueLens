@@ -23,117 +23,199 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ValueLensMaster")
 
+
 async def wait_until(hour: int, minute: int):
     """Calculates remaining seconds until next targeted time occurrence and enters sleep."""
     now = datetime.datetime.now()
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
     if target <= now:
         target += datetime.timedelta(days=1)
+
     sleep_seconds = (target - now).total_seconds()
-    logger.info(f"Next task scheduled for {target.strftime('%Y-%m-%d %H:%M:%S')}. Sleeping {sleep_seconds:.2f}s.")
+
+    logger.info(
+        f"Next task scheduled for {target.strftime('%Y-%m-%d %H:%M:%S')}. "
+        f"Sleeping {sleep_seconds:.2f}s."
+    )
+
     await asyncio.sleep(sleep_seconds)
+
 
 async def incoming_commands_polling_loop():
     """Asynchronous Telegram admin listener."""
+
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     admin_id_str = os.environ.get("ADMIN_TELEGRAM_ID", "")
+
     if not admin_id_str:
         logger.error("CRITICAL: ADMIN_TELEGRAM_ID missing.")
         return
+
     admin_id = int(admin_id_str)
     offset = 0
+
     updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
     send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     while True:
         try:
+
             def fetch():
-                r = requests.get(updates_url, json={"offset": offset, "timeout": 20}, timeout=25)
+                r = requests.get(
+                    updates_url,
+                    json={"offset": offset, "timeout": 20},
+                    timeout=25
+                )
                 return r.json() if r.status_code == 200 else None
+
             response_data = await asyncio.to_thread(fetch)
+
             if not response_data or not response_data.get("ok"):
                 await asyncio.sleep(3)
                 continue
 
             for update in response_data.get("result", []):
+
                 offset = update["update_id"] + 1
+
                 message = update.get("message")
-                if not message or "text" not in message: continue
+
+                if not message or "text" not in message:
+                    continue
 
                 chat_id = message["chat"]["id"]
                 user_id = message["from"]["id"]
                 text = message["text"].strip()
 
                 if user_id != admin_id:
-                    public_msg = "🤖 <b>ValueLens Terminal</b>\n\nPrivate system."
-                    await asyncio.to_thread(lambda: requests.post(send_url, json={"chat_id": chat_id, "text": public_msg, "parse_mode": "HTML"}))
+                    public_msg = (
+                        "🤖 <b>ValueLens Terminal</b>\n\n"
+                        "Private system."
+                    )
+
+                    await asyncio.to_thread(
+                        lambda: requests.post(
+                            send_url,
+                            json={
+                                "chat_id": chat_id,
+                                "text": public_msg,
+                                "parse_mode": "HTML"
+                            }
+                        )
+                    )
                     continue
 
                 if text.startswith("/"):
                     command = text.split()[0].lower()
                     reply = ""
+
                     if command == "/accuracy":
                         w, t, p = get_accuracy_metrics()
-                        reply = f"📊 <b>ValueLens Accuracy Ledger</b>\n• Wins: <code>{w}/{t}</code>\n• Ratio: <b>{p}</b>"
+                        reply = (
+                            f"📊 <b>ValueLens Accuracy Ledger</b>\n"
+                            f"• Wins: <code>{w}/{t}</code>\n"
+                            f"• Ratio: <b>{p}</b>"
+                        )
+
                     elif command == "/status":
-                        reply = "🟢 <b>ValueLens Systems Operational</b>\n• Mode: <code>ACTIVE</code>"
+                        reply = (
+                            "🟢 <b>ValueLens Systems Operational</b>\n"
+                            "• Mode: <code>ACTIVE</code>"
+                        )
+
                     if reply:
-                        await asyncio.to_thread(lambda: requests.post(send_url, json={"chat_id": chat_id, "text": reply, "parse_mode": "HTML"}))
+                        await asyncio.to_thread(
+                            lambda: requests.post(
+                                send_url,
+                                json={
+                                    "chat_id": chat_id,
+                                    "text": reply,
+                                    "parse_mode": "HTML"
+                                }
+                            )
+                        )
+
         except Exception as e:
             await asyncio.sleep(5)
 
+
 async def core_scheduler_loop():
     """Main chronological background lifecycle engine (UK Time Aligned)."""
+
     logger.info("=" * 60)
     logger.info("ValueLens Institutional Chronology Architecture initialized.")
     logger.info("=" * 60)
-    
+
     while True:
         try:
+
             today = datetime.datetime.now()
-            
+
             # --- SATURDAY RECAP OPERATION (09:00 AM) ---
             if today.weekday() == 5:
                 await wait_until(9, 0)
                 await asyncio.to_thread(generate_and_broadcast_weekly_recap)
                 await asyncio.sleep(3600)
                 continue
-            
+
             # --- OPERATIONAL WEEKDAY ROUTINE TIMELINE ---
-            
+
             # 1. Spedizione Report Giornalieri AI (08:00 AM)
             await wait_until(8, 0)
-            logger.info("⏰ [08:00 AM] Triggering Morning Localized Broadcast...")
+            logger.info(
+                "⏰ [08:00 AM] Triggering Morning Localized Broadcast..."
+            )
             await asyncio.to_thread(morning_broadcast)
-            
+
             # 2. Pre-Market Earnings Sniper (12:30 PM)
             await wait_until(12, 30)
-            logger.info("⏰ [12:30 PM] Launching Earnings Catalyst Sniper...")
+            logger.info(
+                "⏰ [12:30 PM] Launching Earnings Catalyst Sniper..."
+            )
             await run_earnings_pipeline()
-            
+
             # 3. Post-Market Value Scanner & Close-Price Analysis (22:30 PM)
             await wait_until(22, 30)
-            logger.info("⏰ [22:30 PM] Launching Nightly Deep Fundamental Routine...")
+            logger.info(
+                "⏰ [22:30 PM] Launching Nightly Deep Fundamental Routine..."
+            )
+
             await asyncio.to_thread(execute_nightly_routine)
             await asyncio.to_thread(evaluate_historical_accuracy_loop)
-            
+
             # 4. SEC Filings Processing Loop (01:00 AM)
             await wait_until(1, 0)
-            logger.info("⏰ [01:00 AM] Scanning Overnight Corporate Insider Fillings...")
+            logger.info(
+                "⏰ [01:00 AM] Scanning Overnight Corporate Insider Fillings..."
+            )
+
             await asyncio.to_thread(run_insider_tracking)
-            
+
             send_alert_to_channel(
                 "📡 <b>System Notice:</b> Daily cycle execution step rotated successfully.",
                 "📡 <b>Notifica di Sistema:</b> Rotazione del ciclo giornaliero completata con successo."
             )
+
             await asyncio.sleep(3600)
+
         except Exception as e:
             logger.error(f"Scheduler core loop failure: {e}")
             await asyncio.sleep(60)
 
+
+async def main():
+    await asyncio.gather(
+        core_scheduler_loop(),
+        incoming_commands_polling_loop()
+    )
+
+
 if __name__ == "__main__":
     init_db()
+
     try:
-        asyncio.run(asyncio.gather(core_scheduler_loop(), incoming_commands_polling_loop()))
+        asyncio.run(main())
+
     except KeyboardInterrupt:
         logger.info("Hardware daemon power-down sequence completed.")
