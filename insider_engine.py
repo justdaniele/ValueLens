@@ -9,33 +9,36 @@ from scanner import get_us_market_universe
 
 logger = logging.getLogger("InsiderEngine")
 
-# Imposta una soglia minima di acquisto per evitare rumore di fondo (es. 100k)
+# Minimum dollar value for a single purchase to be considered high-conviction
 MIN_PURCHASE_VALUE = float(os.environ.get("INSIDER_MIN_VALUE", "100000"))
-SCAN_LIMIT = int(os.environ.get("INSIDER_SCAN_LIMIT", "50"))
 
 def run_insider_tracking():
-    """Scans market universe for high-conviction C-Suite corporate purchases."""
+    """Scans the entire market universe for high-conviction C-Suite open-market purchases."""
     logger.info("Initializing Insider Tracking Engine...")
-    universe, _ = get_us_market_universe()
-    
+    universe = get_us_market_universe()
+    if not universe:
+        logger.error("Market universe is empty. Aborting insider tracking routine.")
+        return
+
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
+
     scanned = 0
     alerts_fired = 0
+
+    logger.info(f"Starting comprehensive insider screening over {len(universe)} assets...")
     
-    for ticker in universe[:SCAN_LIMIT]:
+    # FIX: Loop over the entire universe to completely eliminate alphabetical and size bias
+    for ticker in universe:
         try:
             stock = yf.Ticker(ticker)
             df = stock.insider_transactions
             
             if df is not None and not df.empty:
-                # FIX: Utilizziamo le colonne 'Transaction' (T maiuscola) e 'Value' (V maiuscola)
+                # Validate that modern yfinance columns exist
                 if 'Transaction' in df.columns and 'Value' in df.columns:
-                    # Filtriamo solo gli acquisti a mercato (Buy / Purchase)
+                    # Isolate open-market purchases (exclude stock options or gifts)
                     buys = df[df['Transaction'].astype(str).str.contains('Buy|Purchase', case=False, na=False)]
-                    
-                    # Filtriamo solo acquisti rilevanti maggiori della soglia (es. > 100.000$)
                     recent_buys = buys[buys['Value'] >= MIN_PURCHASE_VALUE]
                     
                     if not recent_buys.empty:
@@ -70,10 +73,11 @@ def run_insider_tracking():
                             logger.info(f"Insider alert dispatched for {ticker} — {num_transactions} tx, {value_str}")
                             alerts_fired += 1
         except Exception as e:
-            logger.debug(f"Skip insider scan for {ticker}: {e}")
+            logger.warning(f"Insider scan failed or skipped for {ticker}: {e}")
             
         scanned += 1
-        time.sleep(0.5)
+        # Pacing window configured to 0.3s to protect network hardware integrity
+        time.sleep(0.3) 
         
     conn.close()
-    logger.info(f"Insider scan complete. Scanned: {scanned}. Alerts fired: {alerts_fired}.")
+    logger.info(f"Insider scan complete. Scanned assets: {scanned}. Alerts fired: {alerts_fired}.")

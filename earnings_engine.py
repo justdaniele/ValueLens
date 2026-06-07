@@ -7,28 +7,24 @@ import datetime
 import yfinance as yf
 from analyzer import generate_earnings_sentiment_layer
 from database import save_earnings_prediction
-from scanner import get_us_market_universe
+from scanner import get_us_market_universe, _sanitise_html
 
 logger = logging.getLogger("EarningsEngine")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
 CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
-
-# Minimum absolute EES score before a Sniper Alert is dispatched
 EES_FIRE_THRESHOLD = int(os.environ.get("EES_FIRE_THRESHOLD", "30"))
 
 def send_alert_to_channel(text_en: str, text_it: str = None):
-    """Broadcasts localized alerts applying safety HTML escape matrices."""
+    """Broadcasts localized alerts applying structural safety HTML escape utilities."""
     if not BOT_TOKEN:
         return
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     def dispatch(channel, text):
-        safe_text = html.escape(text, quote=False)
-        safe_text = safe_text.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
-        safe_text = safe_text.replace("&lt;i&gt;", "<i>").replace("&lt;/i&gt;", "</i>")
+        safe_text = _sanitise_html(text)
         try:
             requests.post(url, json={"chat_id": channel, "text": safe_text, "parse_mode": "HTML"}, timeout=15)
         except Exception as e:
@@ -39,20 +35,37 @@ def send_alert_to_channel(text_en: str, text_it: str = None):
     if CHANNEL_ID_IT and (text_it or text_en):
         dispatch(CHANNEL_ID_IT, text_it if text_it else text_en)
 
+def _compute_quant_score(stock) -> float:
+    """Calculates a dynamic quantitative score based on 52-week positioning range (No hardcoded metrics)."""
+    try:
+        fast = stock.fast_info
+        low = fast.year_low
+        high = fast.year_high
+        price = fast.last_price
+        
+        if low and high and price and (high > low):
+            # Calculate range position: 0.0 at 52w low, 1.0 at 52w high
+            range_pos = (price - low) / (high - low)
+            # Higher score given to assets closer to their 52-week lows (Value Principle)
+            return (1.0 - range_pos) * 20.0
+    except Exception:
+        pass
+    return 10.0 # Standard structural neutral baseline fallback
+
 async def run_earnings_pipeline():
-    """Triggers the predictive earnings analysis on short-term catalysts."""
+    """Identifies active corporate earnings events within a 72h forward window across the entire universe."""
     logger.info("Initiating Earnings Catalyst Sniper Engine...")
-    universe, _ = get_us_market_universe()
+    universe = get_us_market_universe()
     if not universe:
+        logger.error("Market universe empty. Aborting execution string.")
         return
 
     today = datetime.date.today()
     target_window_end = today + datetime.timedelta(days=3)
+    upcoming_catalysts = []
     
-    upcoming = []
-    
-    logger.info("Scanning universe for upcoming earnings within 72h window...")
-    for ticker in universe[:150]: # Scansiona i primi 150 titoli (Regola questo limite secondo necessità)
+    logger.info(f"Scanning full roster of {len(universe)} securities for short-term earnings events...")
+    for ticker in universe:
         try:
             stock = yf.Ticker(ticker)
             calendar = stock.calendar
@@ -62,30 +75,33 @@ async def run_earnings_pipeline():
                 if dates and isinstance(dates, list) and len(dates) > 0:
                     earnings_date = dates[0]
                     
-                    # FIX: yfinance ora restituisce datetime.date direttamente.
-                    # Se fosse un Timestamp o datetime, estraiamo solo il `.date()`
+                    # Normalize yfinance dynamic datetime formats to standard date layouts
                     if hasattr(earnings_date, "date"): 
                         earnings_date = earnings_date.date()
                     
                     if isinstance(earnings_date, datetime.date):
                         if today <= earnings_date <= target_window_end:
-                            upcoming.append(ticker)
-                            logger.info(f"Catalyst found: {ticker} earnings on {earnings_date}")
-        except Exception as e:
+                            upcoming_catalysts.append(ticker)
+                            logger.info(f"Catalyst detected: {ticker} earnings confirmed on {earnings_date}")
+        except Exception:
             pass
-        time.sleep(0.1)
+        # Rate-limit safety margin mapped to 0.3 seconds
+        time.sleep(0.3)
 
-    if not upcoming:
-        logger.info("No upcoming earnings detected in the short-term window.")
+    if not upcoming_catalysts:
+        logger.info("No corporate earnings events found inside the current 72h tracking window.")
         return
         
-    for ticker in upcoming:
+    logger.info(f"Processing deep intelligence analytics for {len(upcoming_catalysts)} target stocks...")
+    for ticker in upcoming_catalysts:
         try:
             stock = yf.Ticker(ticker)
             curr_price = stock.fast_info.last_price
+            company_name = stock.info.get("shortName", ticker)
             
-            quant_score = 10.5 # Default quant base score
-            ai_score = generate_earnings_sentiment_layer(ticker, stock.info.get("shortName", ticker))
+            # Dynamic synthesis layers
+            quant_score = _compute_quant_score(stock)
+            ai_score = generate_earnings_sentiment_layer(ticker, company_name)
             final_ees = round(quant_score + ai_score)
             
             direction = "BULLISH" if final_ees >= 0 else "BEARISH"
@@ -109,4 +125,4 @@ async def run_earnings_pipeline():
                 send_alert_to_channel(msg_en, msg_it)
                 time.sleep(2)
         except Exception as e:
-            logger.error(f"Error processing earnings analysis for {ticker}: {e}")
+            logger.error(f"Error processing deep execution pipeline for {ticker}: {e}")
