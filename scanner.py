@@ -4,6 +4,7 @@ import logging
 import datetime
 import requests
 import sqlite3
+import html
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
@@ -98,7 +99,6 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=0.05):
             logger.debug(f"Skip {ticker} during filter parse: {e}")
         time.sleep(sleep_seconds)
         
-    # Sort the entire index by deepest discount from 52-week highs
     candidates.sort(key=lambda x: x['discount'], reverse=True)
     top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
     
@@ -109,7 +109,6 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=0.05):
 
 def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=0.05):
     """Extracts the top structural candidates from the filtered value pool."""
-    # Since filter_value_universe already sorted by discount, we select the top cut safely
     top_tickers = tickers_list[:max_candidates]
     logger.info(f"Fast‑screen top candidates: {top_tickers}")
     return top_tickers
@@ -131,7 +130,6 @@ def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15, pe_thre
             pb = info.get("priceToBook")
             market_cap = info.get("marketCap", 0)
             
-            # Real Fundamental Filtering (PE Threshold checked here where data exists)
             if pe is not None and pe > pe_threshold:
                 logger.info(f"Rejected {ticker}: P/E ratio ({pe}) above threshold.")
                 continue
@@ -157,13 +155,20 @@ def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15, pe_thre
 # ── TELEGRAM LOGIC ────────────────────────────────────────────────────────────
 
 def broadcast_to_channel(text, channel_id):
-    """Dispatches text payloads to a specified Telegram channel handling length constraints and HTML fallbacks."""
+    """Dispatches text payloads safely by natively escaping loose characters while preserving HTML tags."""
     if not BOT_TOKEN or not channel_id:
         logger.error(f"Missing Telegram Bot Token or Channel ID context for target: {channel_id}")
         return False
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+    
+    # Elegant Native Trick: Escape everything first to neutralize dangerous symbols (&, <, >)
+    safe_text = html.escape(text, quote=False)
+    # Restore ONLY the strict intentional formatting tags back to normal
+    safe_text = safe_text.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
+    safe_text = safe_text.replace("&lt;i&gt;", "<i>").replace("&lt;/i&gt;", "</i>")
+    
+    chunks = [safe_text[i:i+4000] for i in range(0, len(safe_text), 4000)]
     success_all = True
     
     for chunk in chunks:
@@ -178,19 +183,13 @@ def broadcast_to_channel(text, channel_id):
             r.raise_for_status()
             time.sleep(1)
         except Exception as e:
-            logger.warning(f"Telegram HTML parsing failed ({e}). Retrying with absolute plain-text safety fallback...")
-            # Fallback: remove parse_mode so Telegram accepts raw text, markdown symbols, and unescaped characters safely
-            payload_fallback = {
-                "chat_id": channel_id,
-                "text": chunk,
-                "disable_web_page_preview": True
-            }
+            logger.warning(f"Telegram parsing failed ({e}). Attempting pure raw plain-text fallback...")
+            plain_fallback = chunk.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
             try:
-                r = requests.post(url, json=payload_fallback, timeout=15)
-                r.raise_for_status()
+                requests.post(url, json={"chat_id": channel_id, "text": plain_fallback}, timeout=15).raise_for_status()
                 time.sleep(1)
             except Exception as e2:
-                logger.error(f"Telegram critical fallback dispatch failed: {e2}")
+                logger.error(f"Telegram critical fallback execution failed: {e2}")
                 success_all = False
             
     return success_all
@@ -263,7 +262,6 @@ def save_report_to_db(ticker, report_text, lang):
 
 def execute_nightly_routine():
     """Main orchestrator execution loop handling the bilingual nightly screening funnel."""
-    # Ensure database structures and core tables are fully initialized prior to autonomous routine
     init_db()
 
     logger.info("="*60)
@@ -301,17 +299,27 @@ def execute_nightly_routine():
     logger.info("Phase 3: Triggering Dual-Language Generative AI Analysis & DB Commit...")
     
     for ticker in total_candidates:
+        # Fetch fresh comprehensive info object to pass into the AI layer for data grounding
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+        except Exception as e:
+            logger.warning(f"Could not pull fresh market data payload for {ticker}: {e}")
+            info = None
+
+        # 1. Generate and save the report IN ENGLISH
         try:
             logger.info(f"Generating EN report for target: {ticker}...")
-            report_en = analyze_company(ticker, mode="PRO", lang="en")
+            report_en = analyze_company(ticker, mode="PRO", lang="en", company_info=info)
             save_report_to_db(ticker, report_en, "en")
             time.sleep(10)
         except Exception as e:
             logger.error(f"Deep analytical call EN failed for target {ticker}: {e}")
 
+        # 2. Generate and save the report IN ITALIAN
         try:
             logger.info(f"Generating IT report for target: {ticker}...")
-            report_it = analyze_company(ticker, mode="PRO", lang="it")
+            report_it = analyze_company(ticker, mode="PRO", lang="it", company_info=info)
             save_report_to_db(ticker, report_it, "it")
             time.sleep(10)
         except Exception as e:
