@@ -157,7 +157,7 @@ def deep_value_screen(tickers_list, max_candidates=15, sleep_seconds=15, pe_thre
 # ── TELEGRAM LOGIC ────────────────────────────────────────────────────────────
 
 def broadcast_to_channel(text, channel_id):
-    """Dispatches text payloads to a specified Telegram channel handling length constraints."""
+    """Dispatches text payloads to a specified Telegram channel handling length constraints and HTML fallbacks."""
     if not BOT_TOKEN or not channel_id:
         logger.error(f"Missing Telegram Bot Token or Channel ID context for target: {channel_id}")
         return False
@@ -178,8 +178,20 @@ def broadcast_to_channel(text, channel_id):
             r.raise_for_status()
             time.sleep(1)
         except Exception as e:
-            logger.error(f"Telegram dispatch failed: {e}")
-            success_all = False
+            logger.warning(f"Telegram HTML parsing failed ({e}). Retrying with absolute plain-text safety fallback...")
+            # Fallback: remove parse_mode so Telegram accepts raw text, markdown symbols, and unescaped characters safely
+            payload_fallback = {
+                "chat_id": channel_id,
+                "text": chunk,
+                "disable_web_page_preview": True
+            }
+            try:
+                r = requests.post(url, json=payload_fallback, timeout=15)
+                r.raise_for_status()
+                time.sleep(1)
+            except Exception as e2:
+                logger.error(f"Telegram critical fallback dispatch failed: {e2}")
+                success_all = False
             
     return success_all
 
