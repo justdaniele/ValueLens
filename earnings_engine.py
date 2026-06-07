@@ -4,6 +4,7 @@ import logging
 import requests
 import html
 import datetime
+import pandas as pd
 import yfinance as yf
 from analyzer import generate_earnings_sentiment_layer
 from database import save_earnings_prediction
@@ -23,7 +24,7 @@ def send_alert_to_channel(text_en: str, text_it: str = None):
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    def dispatch(channel, text):
+    def dispatch(channel: str, text: str):
         safe_text = _sanitise_html(text)
         try:
             requests.post(url, json={"chat_id": channel, "text": safe_text, "parse_mode": "HTML"}, timeout=15)
@@ -35,80 +36,110 @@ def send_alert_to_channel(text_en: str, text_it: str = None):
     if CHANNEL_ID_IT and (text_it or text_en):
         dispatch(CHANNEL_ID_IT, text_it if text_it else text_en)
 
-def _compute_quant_score(stock) -> float:
-    """Calculates a dynamic quantitative score based on 52-week positioning range (No hardcoded metrics)."""
-    try:
-        fast = stock.fast_info
-        low = fast.year_low
-        high = fast.year_high
-        price = fast.last_price
-        
-        if low and high and price and (high > low):
-            # Calculate range position: 0.0 at 52w low, 1.0 at 52w high
-            range_pos = (price - low) / (high - low)
-            # Higher score given to assets closer to their 52-week lows (Value Principle)
-            return (1.0 - range_pos) * 20.0
-    except Exception:
-        pass
-    return 10.0 # Standard structural neutral baseline fallback
+def _get_earnings_in_window(universe: list, lookahead_hours: int = 48) -> list:
+    """Scans the universe and returns tickers with earnings in the lookahead window."""
+    upcoming = []
+    cutoff = datetime.datetime.now() + datetime.timedelta(hours=lookahead_hours)
 
-async def run_earnings_pipeline():
-    """Identifies active corporate earnings events within a 72h forward window across the entire universe."""
-    logger.info("Initiating Earnings Catalyst Sniper Engine...")
-    universe = get_us_market_universe()
-    if not universe:
-        logger.error("Market universe empty. Aborting execution string.")
-        return
-
-    today = datetime.date.today()
-    target_window_end = today + datetime.timedelta(days=3)
-    upcoming_catalysts = []
-    
-    logger.info(f"Scanning full roster of {len(universe)} securities for short-term earnings events...")
     for ticker in universe:
         try:
             stock = yf.Ticker(ticker)
-            calendar = stock.calendar
-            
-            if calendar and 'Earnings Date' in calendar:
-                dates = calendar['Earnings Date']
-                if dates and isinstance(dates, list) and len(dates) > 0:
-                    earnings_date = dates[0]
-                    
-                    # Normalize yfinance dynamic datetime formats to standard date layouts
-                    if hasattr(earnings_date, "date"): 
-                        earnings_date = earnings_date.date()
-                    
-                    if isinstance(earnings_date, datetime.date):
-                        if today <= earnings_date <= target_window_end:
-                            upcoming_catalysts.append(ticker)
-                            logger.info(f"Catalyst detected: {ticker} earnings confirmed on {earnings_date}")
-        except Exception:
-            pass
-        # Rate-limit safety margin mapped to 0.3 seconds
-        time.sleep(0.3)
+            earnings_dt = None
 
-    if not upcoming_catalysts:
-        logger.info("No corporate earnings events found inside the current 72h tracking window.")
-        return
+            cal = stock.calendar
+            if cal and isinstance(cal, dict):
+                dates = cal.get("Earnings Date")
+                if dates:
+                    for d in (dates if isinstance(dates, list) else [dates]):
+                        try:
+                            dt = pd.Timestamp(d).to_pydatetime().replace(tzinfo=None)
+                            if datetime.datetime.now() <= dt <= cutoff:
+                                earnings_dt = dt
+                                break
+                        except Exception:
+                            pass
+
+            if earnings_dt is None:
+                info = stock.info
+                for key in ("earningsTimestamp", "earningsTimestampStart"):
+                    ts = info.get(key)
+                    if ts:
+                        try:
+                            dt = datetime.datetime.utcfromtimestamp(ts)
+                            if datetime.datetime.now() <= dt <= cutoff:
+                                earnings_dt = dt
+                                break
+                        except Exception:
+                            pass
+
+            if earnings_dt:
+                logger.info(f"Earnings detected for {ticker} at {earnings_dt}")
+                upcoming.append(ticker)
+
+        except Exception as e:
+            logger.debug(f"Calendar lookup failed for {ticker}: {e}")
         
-    logger.info(f"Processing deep intelligence analytics for {len(upcoming_catalysts)} target stocks...")
-    for ticker in upcoming_catalysts:
+        time.sleep(0.3)  # Standard courtesy pacing delay to prevent IP bans
+    return upcoming
+
+def _compute_quant_score(stock: yf.Ticker) -> float:
+    """Computes a quantitative momentum score in [-30, +30] based on range, shorts and analysts."""
+    score = 0.0
+    try:
+        f = stock.fast_info
+        high_52 = getattr(f, 'year_high', None) or getattr(f, 'yearHigh', None)
+        low_52  = getattr(f, 'year_low', None)  or getattr(f, 'yearLow', None)
+        price   = getattr(f, 'last_price', None) or getattr(f, 'lastPrice', None)
+
+        if high_52 and low_52 and price and (high_52 - low_52) > 0:
+            range_pct = (price - low_52) / (high_52 - low_52)
+            score += (0.5 - range_pct) * 20.0
+
+        info = stock.info
+        short_pct = info.get("shortPercentOfFloat") or 0.0
+        if short_pct > 0.20:
+            score -= 10.0
+        elif short_pct < 0.05:
+            score += 5.0
+
+        rec = info.get("recommendationMean")
+        if rec:
+            score += (3.0 - rec) * 5.0
+
+    except Exception as e:
+        logger.debug(f"Quant score calculation error: {e}")
+    return max(-30.0, min(30.0, score))
+
+async def run_earnings_pipeline():
+    """Triggers the predictive earnings analysis on genuine upcoming earnings catalysts."""
+    logger.info("Initiating Earnings Catalyst Sniper Engine...")
+    universe = get_us_market_universe()
+    if not universe:
+        logger.warning("Universe is empty — skipping earnings pipeline.")
+        return
+
+    logger.info(f"Scanning {len(universe)} tickers for earnings in the next 48h...")
+    upcoming = await asyncio.to_thread(_get_earnings_in_window, universe)
+
+    if not upcoming:
+        logger.info("No earnings events detected in the next 48h. Sniper standing by.")
+        return
+
+    for ticker in upcoming:
         try:
             stock = yf.Ticker(ticker)
             curr_price = stock.fast_info.last_price
             company_name = stock.info.get("shortName", ticker)
-            
-            # Dynamic synthesis layers
+
             quant_score = _compute_quant_score(stock)
-            ai_score = generate_earnings_sentiment_layer(ticker, company_name)
-            final_ees = round(quant_score + ai_score)
-            
-            direction = "BULLISH" if final_ees >= 0 else "BEARISH"
+            ai_score    = generate_earnings_sentiment_layer(ticker, company_name)
+            final_ees   = round(quant_score + ai_score)
+
+            direction    = "BULLISH" if final_ees >= 0 else "BEARISH"
             direction_it = "RIALZISTA" if final_ees >= 0 else "RIBASSISTA"
-            
+
             save_earnings_prediction(ticker, curr_price, direction)
-            
+
             if abs(final_ees) >= EES_FIRE_THRESHOLD:
                 msg_en = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"
                           f"Score: <b>{final_ees}</b>\n"
@@ -125,4 +156,4 @@ async def run_earnings_pipeline():
                 send_alert_to_channel(msg_en, msg_it)
                 time.sleep(2)
         except Exception as e:
-            logger.error(f"Error processing deep execution pipeline for {ticker}: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
