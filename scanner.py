@@ -30,10 +30,20 @@ CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
 # ── S&P 500 TICKERS (From Wikipedia) ──────────────────────────────────────────
 
 def get_sp500_tickers():
-    """Downloads the S&P 500 ticker list from Wikipedia."""
+    """Downloads the S&P 500 ticker list from Wikipedia with a spoofed User-Agent."""
     logger.info("Downloading S&P 500 list from Wikipedia...")
     try:
-        table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        # Custom headers to bypass Wikipedia's strict bot-blocking parameters
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        # Fetch raw HTML page content first
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        # Parse the plain text source through pandas
+        table = pd.read_html(response.text)[0]
         tickers = table['Symbol'].tolist()
         tickers = [t.replace('.', '-') for t in tickers]
         logger.info(f"Found {len(tickers)} S&P 500 tickers.")
@@ -59,7 +69,10 @@ def filter_value_universe(tickers, max_candidates=150, sleep_seconds=3,
         try:
             stock = yf.Ticker(ticker)
             f_info = stock.fast_info
-            trailing_pe = getattr(f_info, 'trailingPE', None)
+            
+            # Dual-lookup fallback handling both modern snake_case and older camelCase
+            trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
+            
             if trailing_pe is not None and trailing_pe > pe_threshold:
                 continue
             candidates.append(ticker)
@@ -81,9 +94,12 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
         try:
             stock = yf.Ticker(ticker)
             f_info = stock.fast_info
-            high = getattr(f_info, 'yearHigh', None)
-            current = getattr(f_info, 'lastPrice', None) or getattr(f_info, 'last_price', None)
-            trailing_pe = getattr(f_info, 'trailingPE', None)
+            
+            # Dual-lookup fallback handling both modern snake_case and older camelCase
+            high = getattr(f_info, 'year_high', None) or getattr(f_info, 'yearHigh', None)
+            current = getattr(f_info, 'last_price', None) or getattr(f_info, 'lastPrice', None)
+            trailing_pe = getattr(f_info, 'trailing_pe', None) or getattr(f_info, 'trailingPE', None)
+            
             if high and current:
                 if trailing_pe is not None and trailing_pe > pe_threshold:
                     continue
@@ -96,6 +112,7 @@ def fast_value_screen(tickers_list, max_candidates=20, sleep_seconds=3,
         except Exception as e:
             logger.debug(f"Skip {ticker} during fast screen: {e}")
         time.sleep(sleep_seconds)
+        
     candidates.sort(key=lambda x: x['discount'], reverse=True)
     top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
     logger.info(f"Fast‑screen top candidates: {top_tickers}")
@@ -237,9 +254,10 @@ def execute_nightly_routine():
     logger.info("Starting ValueLens Bilingual Nightly Routine (Scanner + Analyzer)")
     logger.info("="*60)
     
-    if datetime.datetime.now().weekday() >= 5:
-        logger.info("Weekend detected. Equity markets closed. Aborting execution routine.")
-        return
+    # DELETE THE HASHTAG AFTER THE TESTS
+  #  if datetime.datetime.now().weekday() >= 5:
+  #      logger.info("Weekend detected. Equity markets closed. Aborting execution routine.")
+  #      return
 
     sp500 = get_sp500_tickers()
     if not sp500:
