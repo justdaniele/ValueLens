@@ -123,6 +123,16 @@ async def incoming_commands_polling_loop():
                             requests.post(send_url, json={"chat_id": c, "text": r, "parse_mode": "HTML"})
                         await asyncio.to_thread(_send_reply)
 
+        except requests.exceptions.ReadTimeout:
+            # Expected long-polling timeout — not an error
+            await asyncio.sleep(1)
+            continue
+
+        except requests.exceptions.ConnectionError:
+            # Network blip — brief backoff and retry
+            await asyncio.sleep(10)
+            continue
+
         except Exception as e:
             logger.error(f"Error in polling loop: {e}")
             await asyncio.sleep(5)
