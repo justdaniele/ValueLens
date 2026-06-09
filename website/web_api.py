@@ -257,6 +257,40 @@ def price_history(ticker: str):
 
 
 # ─────────────────────────────────────────────
+# /api/live_prices — current prices for insider % change column
+# ─────────────────────────────────────────────
+
+@app.route("/api/live_prices")
+def live_prices():
+    """
+    Returns the latest price for a comma-separated list of tickers.
+    Called by the frontend only during NYSE market hours (09:30–16:00 ET).
+    Uses yfinance fast_info to minimise API load — one call per ticker.
+
+    Example: /api/live_prices?tickers=AAPL,MSFT,NVDA
+    Returns: { "AAPL": 213.40, "MSFT": 441.20, "NVDA": 128.50 }
+    """
+    tickers_param = request.args.get("tickers", "")
+    if not tickers_param:
+        return jsonify({}), 400
+
+    tickers = [t.strip().upper() for t in tickers_param.split(",") if t.strip()]
+    # Hard limit — never fetch more than 20 at once to protect the Pi
+    tickers = tickers[:20]
+
+    result = {}
+    for ticker in tickers:
+        try:
+            price = yf.Ticker(ticker).fast_info.last_price
+            if price:
+                result[ticker] = round(float(price), 2)
+        except Exception as e:
+            logger.debug(f"live_prices: could not fetch {ticker}: {e}")
+
+    return jsonify(result)
+
+
+# ─────────────────────────────────────────────
 # /api/insiders — insider buy signals
 # ─────────────────────────────────────────────
 
