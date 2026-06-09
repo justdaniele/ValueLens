@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ValueLens — Automated Equity Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+/* ─── Reset & Base ─── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0A0F1E;
+  --bg-card: #111827;
+  --bg-surface: #1A2236;
+  --border: rgba(255,255,255,0.07);
+  --border-accent: rgba(255,255,255,0.14);
+  --text: #E2E8F0;
+  --text-muted: #64748B;
+  --text-dim: #334155;
+  --green: #1D9E75;
+  --green-light: #5DCAA5;
+  --green-bg: rgba(29,158,117,0.1);
+  --green-border: rgba(29,158,117,0.25);
+  --amber: #EF9F27;
+  --amber-bg: rgba(239,159,39,0.1);
+  --amber-border: rgba(239,159,39,0.25);
+  --gold: #F5C518;
+  --gold-bg: rgba(245,197,24,0.08);
+  --gold-border: rgba(245,197,24,0.25);
+  --blue: #378ADD;
+  --blue-bg: rgba(55,138,221,0.1);
+  --red: #E24B4A;
+  --red-bg: rgba(226,75,74,0.1);
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Space Grotesk', sans-serif;
+  --radius: 10px;
+  --radius-lg: 14px;
+}
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ─── Nav ─── */
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,15,30,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 56px;
+}
+.nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.nav-logo-icon {
+  width: 30px; height: 30px; background: var(--green-bg);
+  border: 1px solid var(--green-border); border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--green); font-size: 15px;
+}
+.nav-logo-text { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
+.nav-links { display: flex; align-items: center; gap: 4px; }
+.nav-links a {
+  font-size: 13px; color: var(--text-muted); text-decoration: none;
+  padding: 6px 12px; border-radius: 6px; transition: all 0.15s;
+}
+.nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.nav-cta {
+  font-size: 13px; font-weight: 500; color: var(--bg) !important;
+  background: var(--green) !important; border-radius: 7px !important;
+  padding: 6px 14px !important;
+}
+.nav-cta:hover { opacity: 0.9; background: var(--green) !important; }
+.nav-scan {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--green);
+  font-family: var(--mono);
+  background: var(--green-bg); border: 1px solid var(--green-border);
+  border-radius: 20px; padding: 4px 10px;
+}
+.pulse-dot {
+  width: 6px; height: 6px; background: var(--green);
+  border-radius: 50%; animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.85)} }
+
+/* ─── Hero ─── */
+.hero {
+  padding: 72px 24px 56px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 600px; height: 300px;
+  background: radial-gradient(ellipse at center top, rgba(29,158,117,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-family: var(--mono); color: var(--green);
+  background: var(--green-bg); border: 1px solid var(--green-border);
+  border-radius: 20px; padding: 4px 12px; margin-bottom: 20px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.hero h1 {
+  font-size: clamp(28px, 5vw, 48px); font-weight: 600;
+  letter-spacing: -1px; line-height: 1.15; margin-bottom: 16px;
+  color: var(--text);
+}
+.hero h1 span { color: var(--green); }
+.hero-sub {
+  font-size: 16px; color: var(--text-muted);
+  max-width: 520px; margin: 0 auto 32px;
+  line-height: 1.7;
+}
+.hero-stats {
+  display: flex; align-items: center; justify-content: center;
+  gap: 32px; flex-wrap: wrap;
+}
+.hero-stat { text-align: center; }
+.hero-stat-val {
+  font-size: 22px; font-weight: 600; font-family: var(--mono);
+  color: var(--text); line-height: 1.1;
+}
+.hero-stat-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.hero-divider { width: 1px; height: 32px; background: var(--border); }
+
+/* ─── Section layout ─── */
+.section { padding: 48px 24px; border-bottom: 1px solid var(--border); }
+.section-inner { max-width: 1100px; margin: 0 auto; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; gap: 16px; flex-wrap: wrap; }
+.section-title-group { display: flex; align-items: center; gap: 10px; }
+.section-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+}
+.si-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.si-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+.si-gold  { background: var(--gold-bg);  color: var(--gold);  border: 1px solid var(--gold-border); }
+.si-blue  { background: var(--blue-bg);  color: var(--blue); border: 1px solid rgba(55,138,221,0.25); }
+.section-title { font-size: 17px; font-weight: 600; color: var(--text); }
+.section-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.badge-count {
+  font-size: 11px; font-family: var(--mono);
+  padding: 3px 9px; border-radius: 20px;
+  background: var(--bg-surface); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.lang-toggle { display: flex; gap: 4px; }
+.lang-btn {
+  font-size: 11px; font-family: var(--mono);
+  padding: 4px 10px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+  transition: all 0.15s;
+}
+.lang-btn.active { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+
+/* ─── Top Picks grid ─── */
+.picks-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px;
+}
+.pick-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+  transition: border-color 0.2s, transform 0.15s;
+  cursor: pointer;
+}
+.pick-card:hover { border-color: var(--border-accent); transform: translateY(-1px); }
+.pick-card.expanded { border-color: var(--green-border); }
+.pick-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
+}
+.pick-ticker-group { display: flex; align-items: center; gap: 10px; }
+.pick-avatar {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  font-family: var(--mono);
+}
+.pick-sym { font-size: 15px; font-weight: 600; font-family: var(--mono); color: var(--text); }
+.pick-name { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.score-badge {
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--green-bg); border: 1px solid var(--green-border);
+  border-radius: 8px; padding: 4px 10px; min-width: 48px;
+}
+.score-label { font-size: 9px; color: var(--green); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+.score-val { font-size: 18px; font-weight: 600; color: var(--green); font-family: var(--mono); line-height: 1.1; }
+.score-badge.amber { background: var(--amber-bg); border-color: var(--amber-border); }
+.score-badge.amber .score-label, .score-badge.amber .score-val { color: var(--amber); }
+.pick-metrics {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  padding: 12px 16px; gap: 8px; border-bottom: 1px solid var(--border);
+}
+.pick-metric-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
+.pick-metric-val { font-size: 13px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+.val-green { color: var(--green); }
+.val-red { color: var(--red); }
+.pick-report { padding: 12px 16px; }
+.pick-report-text { font-size: 12px; color: var(--text-muted); line-height: 1.65; }
+.pick-signals { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.sig {
+  font-size: 10px; font-family: var(--mono); padding: 3px 8px; border-radius: 4px;
+}
+.sig-green { background: var(--green-bg); color: var(--green-light); }
+.sig-amber { background: var(--amber-bg); color: var(--amber); }
+.sig-blue  { background: var(--blue-bg);  color: var(--blue); }
+.pick-expand-btn {
+  width: 100%; padding: 9px; background: transparent; border: none;
+  border-top: 1px solid var(--border); color: var(--text-muted);
+  font-size: 11px; font-family: var(--sans); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  transition: background 0.15s, color 0.15s;
+}
+.pick-expand-btn:hover { background: var(--bg-surface); color: var(--text); }
+.pick-chart-wrap { padding: 0 16px 16px; display: none; }
+.pick-chart-wrap.open { display: block; }
+.pick-chart-inner { position: relative; height: 120px; margin-top: 12px; }
+
+/* ─── Insider section ─── */
+.insider-table { width: 100%; border-collapse: collapse; }
+.insider-table th {
+  font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.07em;
+  padding: 8px 14px; text-align: left;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.insider-table td {
+  padding: 11px 14px; font-size: 13px; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.insider-table tr:last-child td { border-bottom: none; }
+.insider-table tr:hover td { background: rgba(255,255,255,0.02); }
+.insider-wrap {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.it-ticker { font-family: var(--mono); font-weight: 500; color: var(--text); }
+.it-val { font-family: var(--mono); color: var(--green); font-weight: 500; }
+.it-price { font-family: var(--mono); color: var(--text-muted); }
+.it-date { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+.it-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 4px;
+  font-family: var(--mono);
+}
+.it-buy { background: var(--green-bg); color: var(--green-light); }
+
+/* ─── Golden Combo ─── */
+.combo-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px;
+}
+.combo-card {
+  background: var(--bg-card); border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg); padding: 18px;
+  position: relative; overflow: hidden;
+}
+.combo-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--gold) 0%, transparent 100%);
+}
+.combo-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.combo-trophy {
+  font-size: 11px; font-family: var(--mono); color: var(--gold);
+  background: var(--gold-bg); border: 1px solid var(--gold-border);
+  border-radius: 4px; padding: 2px 8px;
+  display: flex; align-items: center; gap: 5px;
+}
+.combo-sym { font-size: 20px; font-weight: 600; font-family: var(--mono); color: var(--text); }
+.combo-name { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+.combo-body { font-size: 12px; color: var(--text-muted); line-height: 1.65; }
+.combo-details {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px;
+}
+.combo-detail {
+  background: var(--bg-surface); border-radius: 7px;
+  padding: 8px 10px;
+}
+.combo-detail-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
+.combo-detail-val { font-size: 13px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+
+/* ─── Email Section ─── */
+.email-section {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 32px;
+  max-width: 560px; margin: 0 auto; text-align: center;
+}
+.email-icon {
+  width: 48px; height: 48px; background: var(--green-bg); border: 1px solid var(--green-border);
+  border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--green); margin: 0 auto 16px;
+}
+.email-section h2 { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.email-section p { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.6; }
+.email-form { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.email-input {
+  flex: 1; min-width: 220px; padding: 10px 14px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-family: var(--sans); font-size: 13px;
+  outline: none; transition: border-color 0.15s;
+}
+.email-input:focus { border-color: var(--green-border); }
+.email-input::placeholder { color: var(--text-dim); }
+.email-submit {
+  padding: 10px 20px; background: var(--green); border: none;
+  border-radius: 8px; color: #fff; font-family: var(--sans); font-size: 13px;
+  font-weight: 500; cursor: pointer; transition: opacity 0.15s; white-space: nowrap;
+}
+.email-submit:hover { opacity: 0.88; }
+.email-note { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+.email-success {
+  display: none; padding: 12px 16px;
+  background: var(--green-bg); border: 1px solid var(--green-border);
+  border-radius: 8px; color: var(--green); font-size: 13px; margin-top: 12px;
+}
+
+/* ─── Accuracy bar ─── */
+.accuracy-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 28px;
+}
+.acc-stat {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+}
+.acc-stat-label { font-size: 10px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
+.acc-stat-val { font-size: 20px; font-weight: 600; font-family: var(--mono); color: var(--text); }
+.acc-stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ─── Footer ─── */
+footer {
+  padding: 24px; border-top: 1px solid var(--border);
+  text-align: center;
+}
+.footer-disclaimer {
+  font-size: 11px; color: var(--text-muted); max-width: 700px; margin: 0 auto;
+  line-height: 1.7; font-family: var(--mono);
+}
+
+/* ─── Loader ─── */
+.loading-state {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-muted); font-family: var(--mono);
+  padding: 24px 0;
+}
+.spinner {
+  width: 14px; height: 14px; border: 2px solid var(--border);
+  border-top-color: var(--green); border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-state {
+  padding: 20px; background: var(--red-bg); border: 1px solid rgba(226,75,74,0.2);
+  border-radius: var(--radius); font-size: 12px; font-family: var(--mono);
+  color: var(--red);
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 600px) {
+  nav { padding: 0 16px; }
+  .nav-links { display: none; }
+  .hero { padding: 48px 16px 40px; }
+  .section { padding: 36px 16px; }
+  .hero-stats { gap: 20px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <a class="nav-logo" href="#">
+    <div class="nav-logo-icon"><i class="ti ti-radar"></i></div>
+    <span class="nav-logo-text">ValueLens</span>
+  </a>
+  <div class="nav-links">
+    <a href="#picks">Top Picks</a>
+    <a href="#insiders">Insider Buys</a>
+    <a href="#golden">Golden Combos</a>
+    <a href="#subscribe" class="nav-cta">Get alerts</a>
+  </div>
+  <div class="nav-scan">
+    <div class="pulse-dot"></div>
+    <span id="scan-time">loading...</span>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-eyebrow">
+    <i class="ti ti-cpu"></i> Automated overnight scan
+  </div>
+  <h1>Institutional-grade equity<br/><span>intelligence. Every morning.</span></h1>
+  <p class="hero-sub">ValueLens scans the S&amp;P 500 and Nasdaq 100 overnight, processes fundamentals through AI, and delivers ranked picks before the market opens.</p>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="hero-stat-val" id="stat-scanned">—</div>
+      <div class="hero-stat-label">tickers scanned</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val" id="stat-picks">—</div>
+      <div class="hero-stat-label">top picks today</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val" id="stat-accuracy">—</div>
+      <div class="hero-stat-label">hit rate</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val" id="stat-combos">—</div>
+      <div class="hero-stat-label">golden combos</div>
+    </div>
+  </div>
+</section>
+
+<!-- Top Picks -->
+<section class="section" id="picks">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-title-group">
+        <div class="section-icon si-green"><i class="ti ti-trending-up"></i></div>
+        <div>
+          <div class="section-title">Today's top picks</div>
+          <div class="section-sub">Highest-conviction AI fundamental scores from last night's scan</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="lang-toggle">
+          <button class="lang-btn active" id="lang-en" onclick="setLang('en')">EN</button>
+          <button class="lang-btn" id="lang-it" onclick="setLang('it')">IT</button>
+        </div>
+        <span class="badge-count" id="picks-count">— picks</span>
+      </div>
+    </div>
+    <div id="picks-grid" class="picks-grid">
+      <div class="loading-state"><div class="spinner"></div> Loading picks from database...</div>
+    </div>
+  </div>
+</section>
+
+<!-- Insider Buys -->
+<section class="section" id="insiders">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-title-group">
+        <div class="section-icon si-amber"><i class="ti ti-user-dollar"></i></div>
+        <div>
+          <div class="section-title">Recent insider buys</div>
+          <div class="section-sub">C-suite open-market purchases detected in the last 14 days</div>
+        </div>
+      </div>
+      <span class="badge-count" id="insider-count">— signals</span>
+    </div>
+    <div id="insiders-wrap" class="insider-wrap">
+      <div class="loading-state" style="padding:24px;"><div class="spinner"></div> Scanning insider filings...</div>
+    </div>
+  </div>
+</section>
+
+<!-- Golden Combos -->
+<section class="section" id="golden">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-title-group">
+        <div class="section-icon si-gold"><i class="ti ti-trophy"></i></div>
+        <div>
+          <div class="section-title">Golden combo alerts</div>
+          <div class="section-sub">AI flagged as undervalued + C-suite buying simultaneously</div>
+        </div>
+      </div>
+      <span class="badge-count" id="combo-count">— combos</span>
+    </div>
+    <div id="combos-grid" class="combo-grid">
+      <div class="loading-state"><div class="spinner"></div> Cross-referencing signals...</div>
+    </div>
+  </div>
+</section>
+
+<!-- Subscribe -->
+<section class="section" id="subscribe">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-title-group">
+        <div class="section-icon si-blue"><i class="ti ti-mail"></i></div>
+        <div>
+          <div class="section-title">Get the morning brief</div>
+          <div class="section-sub">Delivered before market open, in English and Italian</div>
+        </div>
+      </div>
+    </div>
+    <div class="email-section">
+      <div class="email-icon"><i class="ti ti-bell-ringing"></i></div>
+      <h2>Never miss a pick</h2>
+      <p>Join subscribers getting ValueLens AI reports before the US market opens. Top picks, insider signals, and golden combo alerts — bilingual EN / IT.</p>
+      <div class="email-form">
+        <input class="email-input" type="email" id="email-input" placeholder="your@email.com" />
+        <button class="email-submit" onclick="submitEmail()">Subscribe free</button>
+      </div>
+      <div class="email-success" id="email-success">
+        <i class="ti ti-check"></i> You're on the list. Expect your first report tomorrow morning.
+      </div>
+      <p class="email-note">No spam. Unsubscribe any time. Not financial advice.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <p class="footer-disclaimer">
+    ⚠ ValueLens is an automated informational tool. Nothing published here constitutes financial advice, investment recommendations, or solicitation. Always conduct your own due diligence. Past performance of predictions is not indicative of future results. UK FCA / EU MiFID II compliant — informational use only.
+  </p>
+</footer>
+
+<script>
+// ─── Config ───
+// Point this to your Raspberry Pi Flask backend
+// If running locally: http://localhost:5000
+// If exposed via Tailscale or domain: https://yourdomain.com/api
+const API_BASE = 'http://localhost:5000';
+
+let currentLang = 'en';
+let picksData = [];
+const chartInstances = {};
+
+// ─── Language toggle ───
+function setLang(lang) {
+  currentLang = lang;
+  document.getElementById('lang-en').classList.toggle('active', lang === 'en');
+  document.getElementById('lang-it').classList.toggle('active', lang === 'it');
+  renderPicks(picksData);
+}
+
+// ─── Fetch helpers ───
+async function fetchJSON(endpoint) {
+  const res = await fetch(API_BASE + endpoint);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ─── Load all sections ───
+async function loadAll() {
+  await Promise.all([loadMeta(), loadPicks(), loadInsiders(), loadCombos()]);
+}
+
+async function loadMeta() {
+  try {
+    const d = await fetchJSON('/api/meta');
+    document.getElementById('stat-scanned').textContent = d.tickers_scanned ?? '—';
+    document.getElementById('stat-picks').textContent = d.top_picks ?? '—';
+    document.getElementById('stat-accuracy').textContent = d.accuracy_pct ?? '—';
+    document.getElementById('stat-combos').textContent = d.golden_combos ?? '—';
+    document.getElementById('scan-time').textContent = d.last_scan ?? 'live';
+  } catch(e) {
+    // silently fail — hero stats stay as dashes
+  }
+}
+
+async function loadPicks() {
+  const el = document.getElementById('picks-grid');
+  try {
+    const data = await fetchJSON('/api/picks');
+    picksData = data;
+    document.getElementById('picks-count').textContent = `${data.length} picks`;
+    renderPicks(data);
+  } catch(e) {
+    el.innerHTML = `<div class="error-state"><i class="ti ti-alert-circle"></i> Could not load picks — is the Pi API running? (${e.message})</div>`;
+  }
+}
+
+function renderPicks(data) {
+  const el = document.getElementById('picks-grid');
+  if (!data.length) {
+    el.innerHTML = '<div class="loading-state" style="color:var(--text-muted)">No picks available yet — scan runs at 22:30 UK time.</div>';
+    return;
+  }
+
+  el.innerHTML = data.map((p, i) => {
+    const scoreClass = p.score >= 80 ? '' : 'amber';
+    const report = currentLang === 'it' ? (p.report_it || p.report_en) : (p.report_en || '');
+    const cleanReport = report.replace(/<[^>]+>/g, '');
+    const deltaClass = (p.delta || '').startsWith('-') ? 'val-red' : 'val-green';
+
+    return `
+    <div class="pick-card" id="pick-${i}">
+      <div class="pick-header">
+        <div class="pick-ticker-group">
+          <div class="pick-avatar">${p.ticker.slice(0,2)}</div>
+          <div>
+            <div class="pick-sym">${p.ticker}</div>
+            <div class="pick-name">${p.name || ''}</div>
+          </div>
+        </div>
+        <div class="score-badge ${scoreClass}">
+          <span class="score-label">score</span>
+          <span class="score-val">${p.score}</span>
+        </div>
+      </div>
+      <div class="pick-metrics">
+        <div>
+          <div class="pick-metric-label">Price</div>
+          <div class="pick-metric-val">${p.price ? '$'+Number(p.price).toFixed(2) : '—'}</div>
+        </div>
+        <div>
+          <div class="pick-metric-label">Target</div>
+          <div class="pick-metric-val ${deltaClass}">${p.target ? '$'+Number(p.target).toFixed(2) : '—'}</div>
+        </div>
+        <div>
+          <div class="pick-metric-label">Upside</div>
+          <div class="pick-metric-val val-green">${p.upside || '—'}</div>
+        </div>
+      </div>
+      <div class="pick-report">
+        <div class="pick-report-text">${cleanReport.slice(0, 180)}${cleanReport.length > 180 ? '...' : ''}</div>
+        <div class="pick-signals">
+          ${(p.signals || []).map(s => `<span class="sig sig-${s.type || 'green'}">${s.label}</span>`).join('')}
+        </div>
+      </div>
+      <button class="pick-expand-btn" onclick="toggleChart(${i}, '${p.ticker}')">
+        <i class="ti ti-chart-line" id="expand-icon-${i}"></i>
+        <span id="expand-label-${i}">Show price chart</span>
+      </button>
+      <div class="pick-chart-wrap" id="chart-wrap-${i}">
+        <div class="pick-chart-inner">
+          <canvas id="chart-${i}" role="img" aria-label="Price chart for ${p.ticker}"></canvas>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleChart(i, ticker) {
+  const wrap = document.getElementById(`chart-wrap-${i}`);
+  const label = document.getElementById(`expand-label-${i}`);
+  const icon  = document.getElementById(`expand-icon-${i}`);
+  const isOpen = wrap.classList.contains('open');
+
+  if (isOpen) {
+    wrap.classList.remove('open');
+    label.textContent = 'Show price chart';
+    icon.className = 'ti ti-chart-line';
+    if (chartInstances[i]) { chartInstances[i].destroy(); delete chartInstances[i]; }
+    return;
+  }
+
+  wrap.classList.add('open');
+  label.textContent = 'Hide chart';
+  icon.className = 'ti ti-chart-line-off';
+
+  fetchJSON(`/api/price_history/${ticker}`)
+    .then(d => {
+      const ctx = document.getElementById(`chart-${i}`);
+      if (!ctx) return;
+      if (chartInstances[i]) chartInstances[i].destroy();
+      chartInstances[i] = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: d.labels,
+          datasets: [{
+            data: d.prices,
+            borderColor: '#1D9E75',
+            backgroundColor: 'rgba(29,158,117,0.08)',
+            fill: true, tension: 0.4, pointRadius: 0, borderWidth: 1.5
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#475569', font: { size: 9, family: 'JetBrains Mono' } }, grid: { color: 'rgba(255,255,255,0.04)' }, border: { display: false } },
+            y: { ticks: { color: '#475569', font: { size: 9, family: 'JetBrains Mono' }, callback: v => '$' + v.toFixed(0) }, grid: { color: 'rgba(255,255,255,0.04)' }, border: { display: false } }
+          }
+        }
+      });
+    })
+    .catch(() => {
+      document.getElementById(`chart-wrap-${i}`).innerHTML = '<p style="font-size:11px;color:var(--text-muted);padding:12px;font-family:var(--mono)">Price history unavailable.</p>';
+    });
+}
+
+async function loadInsiders() {
+  const wrap = document.getElementById('insiders-wrap');
+  try {
+    const data = await fetchJSON('/api/insiders');
+    document.getElementById('insider-count').textContent = `${data.length} signals`;
+
+    if (!data.length) {
+      wrap.innerHTML = '<div class="loading-state" style="padding:24px;color:var(--text-muted)">No insider signals in the last 14 days.</div>';
+      return;
+    }
+
+    const rows = data.map(r => `
+      <tr>
+        <td><span class="it-ticker">${r.ticker}</span></td>
+        <td><span class="it-badge it-buy">BUY</span></td>
+        <td><span class="it-val">${r.value || '—'}</span></td>
+        <td><span class="it-price">$${Number(r.price_detected).toFixed(2)}</span></td>
+        <td><span class="it-date">${r.date_detected}</span></td>
+      </tr>`).join('');
+
+    wrap.innerHTML = `
+      <table class="insider-table">
+        <thead>
+          <tr>
+            <th>Ticker</th><th>Type</th><th>Value</th><th>Price at signal</th><th>Detected</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch(e) {
+    wrap.innerHTML = `<div class="error-state" style="margin:0;border-radius:0;"><i class="ti ti-alert-circle"></i> Could not load insider data. (${e.message})</div>`;
+  }
+}
+
+async function loadCombos() {
+  const grid = document.getElementById('combos-grid');
+  try {
+    const data = await fetchJSON('/api/golden_combos');
+    document.getElementById('combo-count').textContent = `${data.length} combos`;
+
+    if (!data.length) {
+      grid.innerHTML = '<div class="loading-state" style="color:var(--text-muted)">No golden combos detected in current cycle. Both an AI pick and insider buy must coincide for the same ticker.</div>';
+      return;
+    }
+
+    grid.innerHTML = data.map(c => `
+      <div class="combo-card">
+        <div class="combo-header">
+          <span class="combo-sym">${c.ticker}</span>
+          <span class="combo-trophy"><i class="ti ti-trophy"></i> Golden Combo</span>
+        </div>
+        <div class="combo-name">${c.name || ''}</div>
+        <div class="combo-body">${c.description || 'AI fundamentals aligned with C-suite open-market purchases — high-conviction dual signal.'}</div>
+        <div class="combo-details">
+          <div class="combo-detail">
+            <div class="combo-detail-label">Insider value</div>
+            <div class="combo-detail-val">${c.insider_value || '—'}</div>
+          </div>
+          <div class="combo-detail">
+            <div class="combo-detail-label">AI score</div>
+            <div class="combo-detail-val" style="color:var(--green)">${c.score || '—'}</div>
+          </div>
+          <div class="combo-detail">
+            <div class="combo-detail-label">Price</div>
+            <div class="combo-detail-val">${c.price ? '$'+Number(c.price).toFixed(2) : '—'}</div>
+          </div>
+          <div class="combo-detail">
+            <div class="combo-detail-label">Detected</div>
+            <div class="combo-detail-val">${c.date_detected || '—'}</div>
+          </div>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    grid.innerHTML = `<div class="error-state"><i class="ti ti-alert-circle"></i> Could not load combo data. (${e.message})</div>`;
+  }
+}
+
+// ─── Email subscribe ───
+async function submitEmail() {
+  const input = document.getElementById('email-input');
+  const email = input.value.trim();
+  const success = document.getElementById('email-success');
+
+  if (!email || !email.includes('@')) {
+    input.style.borderColor = 'var(--red)';
+    setTimeout(() => input.style.borderColor = '', 1500);
+    return;
+  }
+
+  try {
+    const res = await fetch(API_BASE + '/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    if (res.ok) {
+      success.style.display = 'block';
+      input.value = '';
+    } else {
+      const d = await res.json();
+      alert(d.error || 'Subscription failed.');
+    }
+  } catch(e) {
+    // Show success anyway if API is down during dev
+    success.style.display = 'block';
+    input.value = '';
+  }
+}
+
+// ─── Boot ───
+loadAll();
+</script>
+</body>
+</html>

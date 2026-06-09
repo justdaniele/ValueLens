@@ -19,6 +19,6 @@ __pycache__/
 Thumbs.db
 .aider*
 
-
+website/.env
 
 valuelens_scanner.log
