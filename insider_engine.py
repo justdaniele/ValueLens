@@ -109,6 +109,6 @@ def run_insider_tracking():
             logger.warning(f"Insider validation skipped for {ticker}: {e}")
             
         scanned += 1
-        time.sleep(0.5)  # Clean pacing interval anti-throttling link
+        time.sleep(0.8)  # Clean pacing interval anti-throttling link
         
     conn.close()
