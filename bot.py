@@ -139,69 +139,98 @@ async def incoming_commands_polling_loop():
 
 
 async def core_scheduler_loop():
-    """Main chronological background lifecycle engine (UK Time Aligned)."""
+    """Main chronological background lifecycle engine (UK Time Aligned).
+
+    On startup or restart, automatically resumes from the next pending step
+    in the daily cycle rather than waiting for 08:00 the following day.
+    Post-midnight steps (01:00) are treated as belonging to the same cycle
+    as the preceding evening and are scheduled for the next calendar day.
+    """
 
     logger.info("=" * 60)
     logger.info("ValueLens Institutional Chronology Architecture initialized.")
     logger.info("=" * 60)
 
+    async def _nightly_block():
+        """Executes nightly scan and accuracy sweep as a single atomic step."""
+        await asyncio.to_thread(execute_nightly_routine)
+        await asyncio.to_thread(evaluate_historical_accuracy_loop)
+
+    async def _insider_block():
+        """Executes insider tracking and broadcasts daily cycle completion notice."""
+        await asyncio.to_thread(run_insider_tracking)
+        send_alert_to_channel(
+            "📡 <b>System Notice:</b> Daily cycle execution step rotated successfully.",
+            "📡 <b>Notifica di Sistema:</b> Rotazione del ciclo giornaliero completata con successo."
+        )
+
+    # Ordered weekday steps: (hour, minute, log_label, async_factory)
+    WEEKDAY_STEPS = [
+        (8,  0,  "08:00 AM — Morning Broadcast",        lambda: asyncio.to_thread(morning_broadcast)),
+        (12, 30, "12:30 PM — Earnings Catalyst Sniper", lambda: run_earnings_pipeline()),
+        (22, 30, "22:30 PM — Nightly Deep Fundamental", lambda: _nightly_block()),
+        (1,  0,  "01:00 AM — Insider Tracking",         lambda: _insider_block()),
+    ]
+
     while True:
         try:
+            now = datetime.datetime.now()
 
-            today = datetime.datetime.now()
-
-            # --- SATURDAY RECAP OPERATION (09:00 AM) ---
-            if today.weekday() == 5:
+            # --- SATURDAY: weekly recap at 09:00, then idle ---
+            if now.weekday() == 5:
                 await wait_until(9, 0)
                 await asyncio.to_thread(generate_and_broadcast_weekly_recap)
                 await asyncio.sleep(3600)
                 continue
 
             # --- SUNDAY: no operations, sleep until Monday 08:00 ---
-            if today.weekday() == 6:
+            if now.weekday() == 6:
                 logger.info("Sunday detected — no scheduled operations. Sleeping until Monday 08:00.")
                 await wait_until(8, 0)
                 continue
 
-            # --- OPERATIONAL WEEKDAY ROUTINE TIMELINE ---
+            # --- SMART RESUME: build list of steps still in the future ---
+            # Snapshot now once to avoid drift between multiple datetime.now() calls
+            now_snap = datetime.datetime.now()
 
-            # 1. Spedizione Report Giornalieri AI (08:00 AM)
-            await wait_until(8, 0)
-            logger.info(
-                "⏰ [08:00 AM] Triggering Morning Localized Broadcast..."
-            )
-            await asyncio.to_thread(morning_broadcast)
+            def step_target_dt(h, m):
+                """Returns target datetime for h:m relative to now_snap.
+                Post-midnight steps (hour < 8) are placed on the next calendar day
+                to preserve cycle order: 08:00 -> 12:30 -> 22:30 -> 01:00.
+                """
+                base = now_snap.replace(hour=h, minute=m, second=0, microsecond=0)
+                if h < 8:
+                    base += datetime.timedelta(days=1)
+                return base
 
-            # 2. Pre-Market Earnings Sniper (12:30 PM)
-            await wait_until(12, 30)
-            logger.info(
-                "⏰ [12:30 PM] Launching Earnings Catalyst Sniper..."
-            )
-            await run_earnings_pipeline()
+            future_steps = []
+            for h, m, label, factory in WEEKDAY_STEPS:
+                target = step_target_dt(h, m)
+                if target > now_snap:
+                    future_steps.append((target, label, factory))
 
-            # 3. Post-Market Value Scanner & Close-Price Analysis (22:30 PM)
-            await wait_until(22, 30)
-            logger.info(
-                "⏰ [22:30 PM] Launching Nightly Deep Fundamental Routine..."
-            )
+            if not future_steps:
+                # All steps for this cycle passed — wait for tomorrow's 08:00
+                logger.info("All daily steps completed. Sleeping until tomorrow 08:00.")
+                await wait_until(8, 0)
+                continue
 
-            await asyncio.to_thread(execute_nightly_routine)
-            await asyncio.to_thread(evaluate_historical_accuracy_loop)
+            # Execute each remaining step in chronological order
+            future_steps.sort(key=lambda x: x[0])
 
-            # 4. SEC Filings Processing Loop (01:00 AM)
-            await wait_until(1, 0)
-            logger.info(
-                "⏰ [01:00 AM] Scanning Overnight Corporate Insider Fillings..."
-            )
+            for target_dt, label, factory in future_steps:
+                sleep_secs = (target_dt - datetime.datetime.now()).total_seconds()
+                if sleep_secs > 0:
+                    logger.info(
+                        f"Next task scheduled for {target_dt.strftime('%Y-%m-%d %H:%M:%S')}. "
+                        f"Sleeping {sleep_secs:.2f}s."
+                    )
+                    await asyncio.sleep(sleep_secs)
+                logger.info(f"⏰ [{label}]")
+                await factory()
 
-            await asyncio.to_thread(run_insider_tracking)
-
-            send_alert_to_channel(
-                "📡 <b>System Notice:</b> Daily cycle execution step rotated successfully.",
-                "📡 <b>Notifica di Sistema:</b> Rotazione del ciclo giornaliero completata con successo."
-            )
-
-            await asyncio.sleep(3600)
+            # Brief pause before restarting the outer loop
+            await asyncio.sleep(60)
 
         except Exception as e:
             logger.error(f"Scheduler core loop failure: {e}")
