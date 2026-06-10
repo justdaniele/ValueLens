@@ -27,7 +27,8 @@ def run_insider_tracking():
     alerts_fired = 0
     
     today = datetime.date.today()
-    two_weeks_ago = today - datetime.timedelta(days=14)
+    three_months_ago = today - datetime.timedelta(days=90)
+
 
     for ticker in universe:
         try:
@@ -42,7 +43,7 @@ def run_insider_tracking():
                     for _, row in buys.iterrows():
                         try:
                             tx_date = pd.to_datetime(row['Start Date']).date()
-                            if two_weeks_ago <= tx_date <= today:
+                            if three_months_ago <= tx_date <= today:
                                 if float(row['Value']) >= MIN_PURCHASE_VALUE:
                                     recent_buys.append(row)
                         except Exception:
