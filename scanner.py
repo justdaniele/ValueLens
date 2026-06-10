@@ -336,18 +336,15 @@ def morning_broadcast():
     logger.info("Morning broadcast triggered.")
     conn   = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    today  = datetime.datetime.now().strftime("%Y-%m-%d")
 
     channels = [
         {
             "id": CHANNEL_ID_IT, "lang": "it",
-            "header":  "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Target rilevati:</i>\n",
-            "summary": "🌅 Inviati {} report in Italiano."
+            "header": "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Target rilevati:</i>\n",
         },
         {
             "id": CHANNEL_ID_EN, "lang": "en",
-            "header":  "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Targets detected:</i>\n",
-            "summary": "🌅 {} English reports sent."
+            "header": "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Targets detected:</i>\n",
         },
     ]
 
@@ -355,11 +352,12 @@ def morning_broadcast():
         if not channel["id"]:
             continue
 
+        # Search PENDING reports from the last 2 days to survive restarts and date boundaries
         cursor.execute(
             "SELECT ticker, report_text, current_price, target_price "
             "FROM nightly_reports "
-            "WHERE date(date_generated) = ? AND status = 'PENDING' AND lang = ?",
-            (today, channel["lang"])
+            "WHERE date(date_generated) >= date('now', '-2 days') AND status = 'PENDING' AND lang = ?",
+            (channel["lang"],)
         )
         rows = cursor.fetchall()
         if not rows:
@@ -385,12 +383,10 @@ def morning_broadcast():
             if success:
                 cursor.execute(
                     "UPDATE nightly_reports SET status = 'SENT' "
-                    "WHERE ticker = ? AND date(date_generated) = ? AND lang = ?",
-                    (ticker, today, channel["lang"])
+                    "WHERE ticker = ? AND status = 'PENDING' AND lang = ?",
+                    (ticker, channel["lang"])
                 )
             time.sleep(2)
-
-        broadcast_to_channel(channel["summary"].format(len(rows)), channel["id"])
 
     conn.commit()
     conn.close()
