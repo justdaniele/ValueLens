@@ -192,15 +192,16 @@ nav {
 }
 .pick-sym { font-size: 15px; font-weight: 600; font-family: var(--mono); color: var(--text); }
 .pick-name { font-size: 11px; color: var(--text-muted); margin-top: 1px; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score-badge {
-  display: flex; flex-direction: column; align-items: center;
-  background: var(--green-bg); border: 1px solid var(--green-border);
-  border-radius: 7px; padding: 4px 10px; min-width: 46px;
+/* Score ring */
+.score-ring { position: relative; width: 48px; height: 48px; flex-shrink: 0; }
+.score-ring svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+.score-ring-val {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600; font-family: var(--mono);
 }
-.score-badge.amber { background: var(--amber-bg); border-color: var(--amber-border); }
-.score-badge.amber .score-label, .score-badge.amber .score-val { color: var(--amber); }
-.score-label { font-size: 8px; color: var(--green); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.09em; }
-.score-val { font-size: 18px; font-weight: 600; color: var(--green); font-family: var(--mono); line-height: 1.1; }
+.ring-green .score-ring-val { color: var(--green); }
+.ring-amber .score-ring-val { color: var(--amber); }
 
 /* Card metrics row */
 .pick-metrics {
@@ -210,6 +211,16 @@ nav {
 }
 .pick-metric-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
 .pick-metric-val { font-size: 13px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+
+/* Upside fill bar */
+.upside-wrap { padding: 8px 16px 10px; border-bottom: 1px solid var(--border); }
+.upside-label-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+.upside-text { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; }
+.upside-pct { font-size: 11px; font-weight: 600; font-family: var(--mono); color: var(--green); }
+.upside-pct.amber { color: var(--amber); }
+.bar-track { height: 4px; background: var(--bg-surface); border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width 1.2s cubic-bezier(.4,0,.2,1); }
+.bar-fill.amber { background: var(--amber); }
 
 /* Card report — clean, minimal */
 .pick-report { padding: 12px 16px 10px; }
@@ -284,6 +295,14 @@ nav {
 .combo-detail { background: var(--bg-surface); border-radius: 7px; padding: 8px 10px; }
 .combo-detail-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
 .combo-detail-val { font-size: 13px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+
+/* Combo dual signal bars */
+.combo-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.cb-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
+.cb-val { font-size: 13px; font-weight: 600; font-family: var(--mono); margin-bottom: 5px; }
+.cb-track { height: 5px; background: var(--bg-surface); border-radius: 3px; overflow: hidden; }
+.cb-fill-green { height: 100%; border-radius: 3px; background: var(--green); transition: width 1.4s cubic-bezier(.4,0,.2,1); }
+.cb-fill-gold { height: 100%; border-radius: 3px; background: var(--gold); transition: width 1.4s cubic-bezier(.4,0,.2,1); }
 
 /* ─── Telegram channels ─── */
 .tg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
@@ -646,15 +665,26 @@ async function loadAll() {
   await Promise.all([loadMeta(), loadPicks(), loadInsiders(), loadCombos()]);
 }
 
+function countUp(el, target, suffix, duration) {
+  if (!el) return;
+  let current = 0;
+  const step = target / (duration / 16);
+  const t = setInterval(() => {
+    current = Math.min(current + step, target);
+    el.textContent = Math.round(current) + suffix;
+    if (current >= target) clearInterval(t);
+  }, 16);
+}
+
 // ─── Meta / hero stats ───
 async function loadMeta() {
   try {
     const d = await fetchJSON('/api/meta');
-    document.getElementById('stat-scanned').textContent = d.tickers_scanned ?? '—';
-    document.getElementById('stat-picks').textContent   = d.top_picks ?? '—';
-    document.getElementById('stat-accuracy').textContent = d.accuracy_pct ?? '—';
-    document.getElementById('stat-combos').textContent  = d.golden_combos ?? '—';
-    document.getElementById('scan-time').textContent    = d.last_scan ?? 'live';
+    countUp(document.getElementById('stat-scanned'), Number(d.tickers_scanned) || 0, '', 1200);
+    countUp(document.getElementById('stat-picks'),   Number(d.top_picks) || 0, '', 900);
+    countUp(document.getElementById('stat-accuracy'),Number(d.accuracy_pct) || 0, '%', 1000);
+    countUp(document.getElementById('stat-combos'),  Number(d.golden_combos) || 0, '', 700);
+    document.getElementById('scan-time').textContent = d.last_scan ?? 'live';
   } catch(e) { /* hero stats stay as dashes — non-critical */ }
 }
 
@@ -679,28 +709,46 @@ function renderPicks(data) {
   }
 
   el.innerHTML = data.map((p, i) => {
-    const scoreClass = p.score >= 80 ? '' : 'amber';
-    // Strip HTML tags from AI report for clean display
-    const reportRaw = p.report_en || '';
+    const score     = Number(p.score) || 0;
+    const isAmber   = score < 80;
+    const ringColor = isAmber ? '#D97706' : '#1D9E75';
+    const ringBg    = isAmber ? 'rgba(217,119,6,0.15)' : 'rgba(29,158,117,0.15)';
+    const ringClass = isAmber ? 'ring-amber' : 'ring-green';
+    const circ      = 113.1;
+    const offset    = circ * (1 - score / 100);
+
+    // Parse upside percentage for the fill bar (e.g. "+18.5%" or "18.5%")
+    const upsideRaw = p.upside || '';
+    const upsideNum = parseFloat(upsideRaw.replace(/[^0-9.]/g, '')) || 0;
+    // Cap bar at 50% upside = 100% fill width
+    const barWidth  = Math.min((upsideNum / 50) * 100, 100).toFixed(1);
+    const barClass  = isAmber ? 'amber' : '';
+    const upPctClass = isAmber ? 'amber' : '';
+
+    const reportRaw   = p.report_en || '';
     const reportClean = reportRaw.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
-    // Show first 200 chars — concise, not overwhelming
-    const preview = reportClean.length > 200
-      ? reportClean.slice(0, 200).trimEnd() + '…'
-      : reportClean;
+    const preview     = reportClean.length > 200 ? reportClean.slice(0, 200).trimEnd() + '…' : reportClean;
 
     return `
     <div class="pick-card" id="pick-${i}">
       <div class="pick-header">
         <div class="pick-ticker-group">
-          <div class="pick-avatar">${p.ticker.slice(0,2)}</div>
+          <div class="pick-avatar">${p.ticker.slice(0, 2)}</div>
           <div>
             <div class="pick-sym">${p.ticker}</div>
             <div class="pick-name">${p.name || ''}</div>
           </div>
         </div>
-        <div class="score-badge ${scoreClass}">
-          <span class="score-label">score</span>
-          <span class="score-val">${p.score}</span>
+        <div class="score-ring ${ringClass}" aria-label="AI score ${score} out of 100">
+          <svg width="48" height="48" viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="18" fill="none" stroke="${ringBg}" stroke-width="3.5"/>
+            <circle cx="24" cy="24" r="18" fill="none" stroke="${ringColor}" stroke-width="3.5"
+              stroke-linecap="round" stroke-dasharray="${circ}"
+              stroke-dashoffset="${circ}"
+              id="ring-${i}"
+              style="transition: stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"/>
+          </svg>
+          <div class="score-ring-val" id="rscore-${i}">0</div>
         </div>
       </div>
       <div class="pick-metrics">
@@ -713,8 +761,17 @@ function renderPicks(data) {
           <div class="pick-metric-val text-green mono">${p.target ? '$' + Number(p.target).toFixed(2) : '—'}</div>
         </div>
         <div>
-          <div class="pick-metric-label">Upside</div>
-          <div class="pick-metric-val text-green mono">${p.upside || '—'}</div>
+          <div class="pick-metric-label">P/E</div>
+          <div class="pick-metric-val mono">${p.pe ? Number(p.pe).toFixed(1) + 'x' : '—'}</div>
+        </div>
+      </div>
+      <div class="upside-wrap">
+        <div class="upside-label-row">
+          <span class="upside-text">AI upside potential</span>
+          <span class="upside-pct ${upPctClass}">${upsideRaw || '—'}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill ${barClass}" id="bar-${i}" style="width:0%"></div>
         </div>
       </div>
       <div class="pick-report">
@@ -732,6 +789,37 @@ function renderPicks(data) {
       </div>
     </div>`;
   }).join('');
+
+  // Animate rings and bars after DOM is painted
+  requestAnimationFrame(() => {
+    data.forEach((p, i) => {
+      const score    = Number(p.score) || 0;
+      const circ     = 113.1;
+      const target   = circ * (1 - score / 100);
+      const ringEl   = document.getElementById(`ring-${i}`);
+      const scoreEl  = document.getElementById(`rscore-${i}`);
+      const barEl    = document.getElementById(`bar-${i}`);
+      const upsideNum = parseFloat((p.upside || '').replace(/[^0-9.]/g, '')) || 0;
+      const barWidth  = Math.min((upsideNum / 50) * 100, 100).toFixed(1);
+
+      if (ringEl) {
+        setTimeout(() => {
+          ringEl.style.strokeDashoffset = target;
+          // Count up the score number in sync with the ring
+          let current = 0;
+          const step = score / 60;
+          const t = setInterval(() => {
+            current = Math.min(current + step, score);
+            if (scoreEl) scoreEl.textContent = Math.round(current);
+            if (current >= score) clearInterval(t);
+          }, 16);
+        }, i * 80);
+      }
+      if (barEl) {
+        setTimeout(() => { barEl.style.width = barWidth + '%'; }, 300 + i * 80);
+      }
+    });
+  });
 }
 
 function toggleChart(i, ticker) {
@@ -874,23 +962,34 @@ async function loadCombos() {
       grid.innerHTML = '<div class="empty-state">No golden combos in current cycle. A combo requires both an AI pick and an insider buy on the same ticker.</div>';
       return;
     }
-    grid.innerHTML = data.map(c => `
-      <div class="combo-card">
+  grid.innerHTML = data.map((c, i) => {
+      const score     = Number(c.score) || 0;
+      const scoreW    = Math.min(score, 100).toFixed(1);
+      // Normalise insider value to a 0-100 bar (cap at $10M = 100%)
+      const insiderRaw = parseFloat((c.insider_value || '').replace(/[^0-9.]/g, '')) || 0;
+      const insiderW  = Math.min((insiderRaw / 10) * 100, 100).toFixed(1);
+
+      return `
+      <div class="combo-card" id="combo-${i}">
         <div class="combo-header">
           <span class="combo-sym">${c.ticker}</span>
           <span class="combo-trophy"><i class="ti ti-trophy"></i> Golden Combo</span>
         </div>
         <div class="combo-name">${c.name || c.ticker}</div>
-        <div class="combo-body">${c.description || 'AI fundamental scan and C-suite open-market purchases aligned simultaneously — highest-conviction dual signal ValueLens tracks.'}</div>
+        <div class="combo-body">${c.description || 'AI fundamental scan and C-suite open-market purchases aligned simultaneously.'}</div>
+        <div class="combo-bars">
+          <div>
+            <div class="cb-label">AI score</div>
+            <div class="cb-val" style="color:var(--green)">${score}/100</div>
+            <div class="cb-track"><div class="cb-fill-green" id="cg-${i}" style="width:0%"></div></div>
+          </div>
+          <div>
+            <div class="cb-label">Insider buy</div>
+            <div class="cb-val" style="color:var(--gold)">${c.insider_value || '—'}</div>
+            <div class="cb-track"><div class="cb-fill-gold" id="ci-${i}" style="width:0%"></div></div>
+          </div>
+        </div>
         <div class="combo-details">
-          <div class="combo-detail">
-            <div class="combo-detail-label">Insider value</div>
-            <div class="combo-detail-val">${c.insider_value || '—'}</div>
-          </div>
-          <div class="combo-detail">
-            <div class="combo-detail-label">AI score</div>
-            <div class="combo-detail-val" style="color:var(--green)">${c.score || '—'}</div>
-          </div>
           <div class="combo-detail">
             <div class="combo-detail-label">Price at detection</div>
             <div class="combo-detail-val">${c.price ? '$' + Number(c.price).toFixed(2) : '—'}</div>
@@ -900,7 +999,22 @@ async function loadCombos() {
             <div class="combo-detail-val">${c.date_detected || '—'}</div>
           </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+
+    // Animate combo bars after paint
+    requestAnimationFrame(() => {
+      data.forEach((c, i) => {
+        const score    = Number(c.score) || 0;
+        const insiderRaw = parseFloat((c.insider_value || '').replace(/[^0-9.]/g, '')) || 0;
+        setTimeout(() => {
+          const gEl = document.getElementById(`cg-${i}`);
+          const iEl = document.getElementById(`ci-${i}`);
+          if (gEl) gEl.style.width = Math.min(score, 100).toFixed(1) + '%';
+          if (iEl) iEl.style.width = Math.min((insiderRaw / 10) * 100, 100).toFixed(1) + '%';
+        }, 300 + i * 100);
+      });
+    });
   } catch(e) {
     grid.innerHTML = `<div class="error-state"><i class="ti ti-alert-circle"></i> Could not load combo data. (${e.message})</div>`;
   }
