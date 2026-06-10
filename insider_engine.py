@@ -11,7 +11,7 @@ from scanner import get_us_market_universe
 
 logger = logging.getLogger("InsiderEngine")
 MIN_PURCHASE_VALUE = float(os.environ.get("INSIDER_MIN_VALUE", "100000"))
-SCAN_LIMIT = int(os.environ.get("INSIDER_SCAN_LIMIT", "50"))
+
 
 def run_insider_tracking():
     """Scans the entire market universe for high-conviction corporate purchase footprints."""
@@ -29,7 +29,7 @@ def run_insider_tracking():
     today = datetime.date.today()
     two_weeks_ago = today - datetime.timedelta(days=14)
 
-    for ticker in universe[:SCAN_LIMIT]:
+    for ticker in universe:
         try:
             stock = yf.Ticker(ticker)
             df = stock.insider_transactions
@@ -109,6 +109,6 @@ def run_insider_tracking():
             logger.warning(f"Insider validation skipped for {ticker}: {e}")
             
         scanned += 1
-        time.sleep(0.3)  # Clean pacing interval anti-throttling link
+        time.sleep(0.5)  # Clean pacing interval anti-throttling link
         
     conn.close()
