@@ -66,12 +66,28 @@ ADMIN_TELEGRAM_ID=your_numerical_telegram_id
 
 
 3. Execution Daemon
-Launch the autonomous master engine in protected background mode:
 
+## ⚙️ Quick Start & Deployment
+
+### 3. Execution
+
+Launch all services with a single command:
+
+```bash
+chmod +x start.sh stop.sh
+./start.sh
 ```
-Bash
-nohup python bot.py > valuelens_master.log 2>&1 &
 
+To stop everything:
+```bash
+./stop.sh
+```
+
+**Manual launch (alternative):**
+```bash
+nohup python3 -u bot.py > valuelens_master.log 2>&1 &
+cd website && nohup python web_api.py &> web_api.log &
+sudo tailscale funnel --bg 5000
 ```
 
 
