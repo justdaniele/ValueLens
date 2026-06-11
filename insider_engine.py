@@ -46,7 +46,7 @@ def _get_recent_form4_accessions(cik: str, ticker: str, days_back: int = 90) -> 
     cutoff = datetime.date.today() - datetime.timedelta(days=days_back)
 
     try:
-        resp = requests.get(url, headers=EDGAR_HEADERS, timeout=15)
+        resp = requests.get(url, headers=EDGAR_HEADERS, timeout=30)
         if resp.status_code != 200:
             return []
 
@@ -58,10 +58,13 @@ def _get_recent_form4_accessions(cik: str, ticker: str, days_back: int = 90) -> 
 
         results = []
         for form, filed, acc in zip(forms, dates, accnums):
-            if form != "4":
-                continue
+            # Stop early once filings are older than the lookback window
+            # EDGAR returns filings in reverse chronological order
             try:
-                if datetime.date.fromisoformat(filed) >= cutoff:
+                filed_date = datetime.date.fromisoformat(filed)
+                if filed_date < cutoff:
+                    break  # All subsequent filings are older — stop scanning
+                if form == "4":
                     results.append((acc.replace("-", ""), filed))
             except Exception:
                 pass
