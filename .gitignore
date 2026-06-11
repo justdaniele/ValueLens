@@ -21,4 +21,5 @@ Thumbs.db
 
 website/.env
 
+.claudeignore
 valuelens_scanner.log
