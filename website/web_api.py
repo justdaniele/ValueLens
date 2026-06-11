@@ -20,7 +20,7 @@ import sqlite3
 import logging
 import datetime
 import yfinance as yf
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 logging.basicConfig(
@@ -29,14 +29,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ValueLensAPI")
 
-app = Flask(__name__)
+# Resolve paths relative to this file so the API works regardless of cwd
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = BASE_DIR  # index.html lives next to web_api.py
 
-# Allow requests from your website domain.
-# During dev: "*" is fine. In production replace with your actual domain.
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
+
+# Allow requests from any origin — restrict to your domain in production
 CORS(app, origins=["*"])
 
-DB_NAME = os.environ.get("VALUELENS_DB", "valuelens.db")
-SUBSCRIBERS_DB = "subscribers.db"
+# valuelens.db is one level up from the website/ folder
+DB_NAME        = os.environ.get("VALUELENS_DB", os.path.join(BASE_DIR, "..", "valuelens.db"))
+SUBSCRIBERS_DB = os.path.join(BASE_DIR, "subscribers.db")
+
+
+@app.route("/")
+def index():
+    """Serve the main frontend page."""
+    return send_from_directory(STATIC_DIR, "index.html")
 
 # ─────────────────────────────────────────────
 # Helpers
