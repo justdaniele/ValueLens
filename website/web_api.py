@@ -211,8 +211,9 @@ def picks():
             except ValueError:
                 score = 50
 
-        # Parse structured sections from EN report for card display
+        # Parse structured sections and machine-readable scores from EN report
         sections = _parse_report_sections(d["report_en"] or "")
+        sec_scores = _parse_section_scores(d["report_en"] or "")
 
         # Build signal tags from report keywords
         signals = _extract_signals(d["report_en"] or "")
@@ -227,7 +228,10 @@ def picks():
             "report_en": d["report_en"],
             "report_it": d["report_it"],
             "signals": signals,
-            "sections": sections
+            "sections": sections,
+            "dcf_score":    sec_scores["dcf_score"],
+            "zombie_score": sec_scores["zombie_score"],
+            "short_score":  sec_scores["short_score"],
         })
 
     # Sort by score descending, limit to top 10
@@ -242,6 +246,29 @@ def _parse_opportunity_score(report_text: str) -> int:
     if match:
         return min(99, max(1, int(match.group(1))))
     return 0
+
+
+def _parse_section_scores(report_text: str) -> dict:
+    """Extracts the machine-readable SCORES line from the AI report.
+    Expected format: SCORES: DCF=X | ZOMBIE=X | SHORT=X
+    Returns dict with keys dcf_score, zombie_score, short_score (integers -10 to +10).
+    """
+    import re
+    defaults = {"dcf_score": 0, "zombie_score": 0, "short_score": 0}
+    if not report_text:
+        return defaults
+    match = re.search(
+        r"SCORES:\s*DCF=(-?\d+)\s*\|\s*ZOMBIE=(-?\d+)\s*\|\s*SHORT=(-?\d+)",
+        report_text, re.IGNORECASE
+    )
+    if not match:
+        return defaults
+    clamp = lambda v: max(-10, min(10, int(v)))
+    return {
+        "dcf_score":    clamp(match.group(1)),
+        "zombie_score": clamp(match.group(2)),
+        "short_score":  clamp(match.group(3)),
+    }
 
 
 def _parse_report_sections(report_text: str) -> dict:

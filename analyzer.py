@@ -24,10 +24,11 @@ ANALYSIS_SYSTEM_PROMPT = """You are ValueLens, an institutional financial analys
 STRICT FORMATTING RULES:
 - Use ONLY <b>bold</b> and <i>italic</i> HTML tags. Never use Markdown (**, __, backticks).
 - NEVER write literal "<br>", "<br/>" or "\\n". Use real newlines only.
-- Each of the 3 sections: header emoji + bold label, then 2-3 lines max of tight analysis.
-- End with a divider line then the Opportunity Score block.
-- Opportunity Score: integer 0-100 derived from fundamentals. Be ruthlessly honest.
-- Verdict: 1 sentence — genuine opportunity or value trap, and why in one clause.
+- Each of the 3 sections: header emoji + bold label, then MAXIMUM 1-2 lines of tight analysis. Never exceed 2 lines per section.
+- End with a divider line then the score block.
+- Opportunity Score: integer 0-100. Be ruthlessly honest.
+- SCORES line (machine-readable, always include): SCORES: DCF=X | ZOMBIE=X | SHORT=X where each X is -10 (max bearish) to +10 (max bullish).
+- Verdict: exactly 1 sentence.
 - No filler words. No repetition. Every sentence must add new information.
 """
 
@@ -47,32 +48,36 @@ def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_in
             f"Genera un brief per <b>{ticker}</b> ({info.get('shortName', ticker)}) usando questi dati reali:\n"
             f"- P/E: {info.get('trailingPE', 'N/A')} | P/B: {info.get('priceToBook', 'N/A')}\n"
             f"- Target Analisti: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n\n"
-            f"Struttura esattamente cosi':\n\n"
+            f"Struttura ESATTAMENTE cosi' (nessuna deviazione):\n\n"
             f"📉 <b>Reverse DCF</b>\n"
-            f"[2-3 righe: tasso di crescita implicito nel prezzo attuale, e' realistico?]\n\n"
+            f"[1-2 righe MAX: tasso di crescita implicito nel prezzo attuale, e' realistico?]\n\n"
             f"🧟 <b>Zombie Detector</b>\n"
-            f"[2-3 righe: salute del bilancio, qualita' cash flow, rischio insolvenza]\n\n"
+            f"[1-2 righe MAX: salute del bilancio, qualita' cash flow, rischio insolvenza]\n\n"
             f"🎯 <b>Short Interest & Sentiment</b>\n"
-            f"[2-3 righe: {short_interest_str} — pressione short, potenziale squeeze]\n\n"
+            f"[1-2 righe MAX: {short_interest_str} — pressione short e potenziale squeeze]\n\n"
             f"━━━━━━━━━━━━\n"
             f"💎 <b>Opportunity Score: X/100</b>\n"
-            f"<i>Verdict: [opportunita' reale o trappola di valore, motivo principale in una frase]</i>"
+            f"SCORES: DCF=X | ZOMBIE=X | SHORT=X\n"
+            f"<i>Verdict: [opportunita' reale o trappola di valore, una frase]</i>\n"
+            f"(Linea SCORES: ogni X e' un intero da -10 ribassista a +10 rialzista per quella sezione)"
         )
     else:
         user_content = (
             f"Generate a brief for <b>{ticker}</b> ({info.get('shortName', ticker)}) using this real data:\n"
             f"- P/E: {info.get('trailingPE', 'N/A')} | P/B: {info.get('priceToBook', 'N/A')}\n"
             f"- Analyst Target: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n\n"
-            f"Structure exactly as follows:\n\n"
+            f"Structure EXACTLY as follows (no deviations):\n\n"
             f"📉 <b>Reverse DCF</b>\n"
-            f"[2-3 lines: implied growth rate in current price, is it realistic?]\n\n"
+            f"[1-2 lines MAX: implied growth rate in current price, is it realistic?]\n\n"
             f"🧟 <b>Zombie Detector</b>\n"
-            f"[2-3 lines: balance sheet health, cash flow quality, insolvency risk]\n\n"
+            f"[1-2 lines MAX: balance sheet health, cash flow quality, insolvency risk]\n\n"
             f"🎯 <b>Short Interest & Sentiment</b>\n"
-            f"[2-3 lines: {short_interest_str} — short pressure level, squeeze potential]\n\n"
+            f"[1-2 lines MAX: {short_interest_str} — short pressure and squeeze potential]\n\n"
             f"━━━━━━━━━━━━\n"
             f"💎 <b>Opportunity Score: X/100</b>\n"
-            f"<i>Verdict: [genuine opportunity or value trap, main reason in one sentence]</i>"
+            f"SCORES: DCF=X | ZOMBIE=X | SHORT=X\n"
+            f"<i>Verdict: [genuine opportunity or value trap, one sentence]</i>\n"
+            f"(SCORES line: each X is an integer from -10 bearish to +10 bullish for that section)"
         )
 
     try:
