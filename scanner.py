@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 from analyzer import analyze_company
-from database import DB_NAME, init_db, save_report_to_db
+from database import DB_NAME, init_db, save_report_to_db, was_recently_alerted, record_alert_sent
 
 load_dotenv()
 
@@ -324,6 +324,38 @@ def broadcast_to_channel(text: str, channel_id: str, image_path: str = None) -> 
     return success_all
 
 
+
+
+# ---------------------------------------------------------------------------
+# Nightly winners cache — shared between scanner and insider_engine
+# ---------------------------------------------------------------------------
+
+_WINNERS_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nightly_winners.json")
+
+
+def _write_nightly_winners(tickers: list):
+    """Persists tonight's fundamental winners to a temp file for the insider engine."""
+    import json as _json
+    try:
+        with open(_WINNERS_CACHE_PATH, "w") as f:
+            _json.dump({"tickers": tickers, "date": str(datetime.datetime.now().date())}, f)
+    except Exception as e:
+        logger.warning(f"Could not write nightly winners cache: {e}")
+
+
+def get_nightly_winners() -> list:
+    """Returns tonight's fundamental winners. Empty list if stale or missing."""
+    import json as _json
+    try:
+        with open(_WINNERS_CACHE_PATH) as f:
+            data = _json.load(f)
+        file_date = datetime.date.fromisoformat(data.get("date", "2000-01-01"))
+        if (datetime.date.today() - file_date).days <= 1:
+            return data.get("tickers", [])
+    except Exception:
+        pass
+    return []
+
 # ---------------------------------------------------------------------------
 # Morning broadcast
 # ---------------------------------------------------------------------------
@@ -415,11 +447,22 @@ def execute_nightly_routine():
     total_candidates = deep_value_screen(fast_candidates)
 
     logger.info("Phase 4: AI Analysis & DB storage...")
+
+    # Tonight's winners — written to cache for insider_engine Golden Combo check
+    nightly_winners = []
+
     for candidate in total_candidates:
         ticker  = candidate["ticker"]
         info    = candidate.get("info") or {}
         c_price = info.get("currentPrice") or info.get("regularMarketPrice")
         t_price = info.get("targetMeanPrice")
+
+        # Deduplication: skip tickers alerted in the last 5 days
+        if was_recently_alerted(ticker, cooldown_days=5):
+            logger.info(f"Skipping {ticker} — alerted within cooldown window.")
+            continue
+
+        nightly_winners.append(ticker)
 
         try:
             logger.info(f"Generating EN report for {ticker}...")
@@ -437,6 +480,12 @@ def execute_nightly_routine():
         except Exception as e:
             logger.error(f"IT analysis failed for {ticker}: {e}")
 
+        # Mark ticker as alerted in unified deduplication table
+        record_alert_sent(ticker, alert_type="fundamental")
+
+    # Persist tonight's winners list for the insider engine
+    _write_nightly_winners(nightly_winners)
+
     logger.info("=" * 60)
-    logger.info("Nightly pipeline complete.")
+    logger.info(f"Nightly pipeline complete. New reports: {len(nightly_winners)}")
     logger.info("=" * 60)

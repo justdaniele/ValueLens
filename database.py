@@ -61,6 +61,18 @@ def init_db():
     if not cursor.fetchone():
         cursor.execute("INSERT INTO metadata (key, value) VALUES ('accuracy_total', 0)")
         
+    # Unified deduplication table — prevents same ticker being alerted more than once
+    # within the cooldown window, regardless of alert type (fundamental or insider).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sent_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            alert_type TEXT NOT NULL,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sent_alerts_ticker ON sent_alerts (ticker, sent_at)")
+
     conn.commit()
     conn.close()
     logger.info("Database schema initialized and fully matched with tracking engines.")
@@ -191,4 +203,31 @@ def evaluate_historical_accuracy_loop():
         conn.commit()
         logger.info(f"Accuracy sweep complete. Added {wins_added} wins out of {total_added} evaluated metrics.")
         
+    conn.close()
+
+def was_recently_alerted(ticker: str, cooldown_days: int = 5) -> bool:
+    """Returns True if the ticker was already alerted within the cooldown window.
+
+    Checks the unified sent_alerts table regardless of alert type (fundamental/insider).
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id FROM sent_alerts WHERE ticker = ? AND sent_at >= datetime('now', ?)",
+        (ticker, f"-{cooldown_days} days")
+    )
+    result = cursor.fetchone() is not None
+    conn.close()
+    return result
+
+
+def record_alert_sent(ticker: str, alert_type: str = "fundamental"):
+    """Records that an alert was sent for a ticker in the unified deduplication table."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO sent_alerts (ticker, alert_type) VALUES (?, ?)",
+        (ticker, alert_type)
+    )
+    conn.commit()
     conn.close()
