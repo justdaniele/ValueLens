@@ -377,7 +377,7 @@ def insiders():
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT ticker, date_detected, price_detected, status
+        SELECT ticker, date_detected, price_detected, total_value, num_transactions, status
         FROM insider_signals
         WHERE status = 'ACTIVE'
         ORDER BY date_detected DESC
@@ -388,12 +388,15 @@ def insiders():
 
     result = []
     for r in rows:
+        tv = r["total_value"] if r["total_value"] else 0.0
         result.append({
-            "ticker": r["ticker"],
-            "date_detected": r["date_detected"],
-            "price_detected": r["price_detected"],
-            "status": r["status"],
-            "value": None  # Value not stored in current schema; can be enriched later
+            "ticker":           r["ticker"],
+            "date_detected":    r["date_detected"],
+            "price_detected":   r["price_detected"],
+            "num_transactions": r["num_transactions"] or 0,
+            "total_value":      tv if tv > 0 else None,
+            "value_formatted":  f"${tv:,.0f}" if tv and tv > 0 else None,
+            "status":           r["status"],
         })
     return jsonify(result)
 
@@ -434,13 +437,15 @@ def golden_combos():
         except ValueError:
             pass
 
+        tv = r["total_value"] if r["total_value"] else 0.0
         result.append({
-            "ticker": r["ticker"],
-            "name": r["ticker"],
-            "price": r["current_price"],
-            "target": r["target_price"],
-            "score": score,
-            "insider_value": "See Telegram",
+            "ticker":         r["ticker"],
+            "name":           r["ticker"],
+            "price":          r["current_price"],
+            "target":         r["target_price"],
+            "score":          score,
+            "insider_value":  f"${tv:,.0f}" if tv and tv > 0 else None,
+            "price_at_detection": r["current_price"],
             "date_detected": r["date_detected"][:10] if r["date_detected"] else None,
             "description": (
                 f"AI fundamental scan flagged {r['ticker']} as high-conviction, "

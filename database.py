@@ -18,13 +18,16 @@ def init_db():
         )
     """)
 
-    # FIX: Added price_detected column to perfectly match insider_engine.py footprint
+    # insider_signals stores one record per ticker per detection cycle.
+    # total_value: sum of all open-market purchases found in that cycle.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS insider_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT UNIQUE,
             date_detected TEXT,
             price_detected REAL DEFAULT 0.0,
+            total_value REAL DEFAULT 0.0,
+            num_transactions INTEGER DEFAULT 0,
             status TEXT DEFAULT 'ACTIVE'
         )
     """)
