@@ -12,7 +12,7 @@ from scanner import get_us_market_universe, get_nightly_winners
 
 logger = logging.getLogger("InsiderEngine")
 
-MIN_PURCHASE_VALUE = float(os.environ.get("INSIDER_MIN_VALUE", "100000"))
+MIN_PURCHASE_VALUE = float(os.environ.get("INSIDER_MIN_VALUE", "500000"))
 RANDOM_SAMPLE_SIZE = int(os.environ.get("INSIDER_RANDOM_SAMPLE", "50"))
 COOLDOWN_DAYS      = int(os.environ.get("INSIDER_COOLDOWN_DAYS", "5"))
 
@@ -231,8 +231,9 @@ def run_insider_tracking():
         # Winners (potential Golden Combo) always processed — no cap applies
         # Random sample stops after MAX_ALERTS_PER_RUN non-combo alerts
         if not is_winner and alerts_fired >= MAX_ALERTS_PER_RUN:
-            logger.info(f"Max non-combo alerts ({MAX_ALERTS_PER_RUN}) reached — winners still processing.")
-            continue
+            # Cap reached for random sample — still process any remaining winners
+            if ticker.upper() not in nightly_winners:
+                continue
         try:
             fired = _process_ticker(ticker.upper(), universe_set, nightly_winners, cursor, conn)
             if fired:
