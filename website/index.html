@@ -234,11 +234,78 @@ nav {
 
 /* Card chart toggle */
 /* ─── Pick indicator sections ─── */
-.pick-indicators { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 4px; }
-.pick-indicator { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
-.pick-ind-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.02em; }
-.pick-ind-text { font-size: 12px; color: var(--fg); line-height: 1.5; }
-.pick-verdict { font-size: 12px; color: var(--green); font-style: italic; padding: 8px 12px; border-left: 2px solid var(--green); margin-top: 2px; line-height: 1.5; }
+.pick-indicators { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; }
+
+.pick-indicator {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 0 10px;
+  align-items: start;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+.pick-indicator:hover { border-color: var(--border-hi); }
+
+.pick-ind-icon {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ind-dcf   .pick-ind-icon { background: rgba(59,130,246,0.12); }
+.ind-zombie .pick-ind-icon { background: rgba(220,38,38,0.10); }
+.ind-short .pick-ind-icon { background: rgba(217,119,6,0.10); }
+
+.pick-ind-body { min-width: 0; }
+.pick-ind-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; margin-bottom: 3px;
+}
+.ind-dcf    .pick-ind-label { color: var(--blue); }
+.ind-zombie .pick-ind-label { color: var(--red); }
+.ind-short  .pick-ind-label { color: var(--amber); }
+
+.pick-ind-text {
+  font-size: 12px; color: var(--text); line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pick-verdict {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--green-bg);
+  border: 1px solid var(--green-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 4px;
+}
+.pick-verdict-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.pick-verdict-text { font-size: 12px; color: var(--green-light); font-style: italic; line-height: 1.55; }
+
+/* Full report expand */
+.pick-full-report {
+  display: none; margin-top: 10px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+  font-size: 12px; color: var(--text); line-height: 1.7;
+  white-space: pre-wrap;
+}
+.pick-full-report.open { display: block; }
+.pick-read-btn {
+  width: 100%; margin-top: 10px;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px;
+  color: var(--text-muted); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.pick-read-btn:hover { border-color: var(--green); color: var(--green); }
 
 .pick-expand-btn {
   width: 100%; padding: 8px; background: transparent; border: none;
@@ -784,20 +851,38 @@ function renderPicks(data) {
         </div>
       </div>
       <div class="pick-indicators">
-        <div class="pick-indicator">
-          <div class="pick-ind-label">📉 Reverse DCF</div>
-          <div class="pick-ind-text">${dcfText || '—'}</div>
+        <div class="pick-indicator ind-dcf">
+          <div class="pick-ind-icon">📉</div>
+          <div class="pick-ind-body">
+            <div class="pick-ind-label">Reverse DCF</div>
+            <div class="pick-ind-text">${dcfText || '—'}</div>
+          </div>
         </div>
-        <div class="pick-indicator">
-          <div class="pick-ind-label">🧟 Zombie Detector</div>
-          <div class="pick-ind-text">${zombieText || '—'}</div>
+        <div class="pick-indicator ind-zombie">
+          <div class="pick-ind-icon">🧟</div>
+          <div class="pick-ind-body">
+            <div class="pick-ind-label">Zombie Detector</div>
+            <div class="pick-ind-text">${zombieText || '—'}</div>
+          </div>
         </div>
-        <div class="pick-indicator">
-          <div class="pick-ind-label">🎯 Short Interest</div>
-          <div class="pick-ind-text">${shortText || '—'}</div>
+        <div class="pick-indicator ind-short">
+          <div class="pick-ind-icon">🎯</div>
+          <div class="pick-ind-body">
+            <div class="pick-ind-label">Short Interest</div>
+            <div class="pick-ind-text">${shortText || '—'}</div>
+          </div>
         </div>
-        ${verdictText ? `<div class="pick-verdict">💎 ${verdictText}</div>` : ''}
+        ${verdictText ? `
+        <div class="pick-verdict">
+          <div class="pick-verdict-icon">💎</div>
+          <div class="pick-verdict-text">${verdictText}</div>
+        </div>` : ''}
       </div>
+      <button class="pick-read-btn" onclick="toggleReport(${i})">
+        <i class="ti ti-file-text" id="report-icon-${i}"></i>
+        <span id="report-label-${i}">Read full report</span>
+      </button>
+      <div class="pick-full-report" id="full-report-${i}">${(p.report_en || '').replace(/<[^>]+>/g, '')}</div>
       <button class="pick-expand-btn" onclick="toggleChart(${i}, '${p.ticker}')">
         <i class="ti ti-chart-line" id="expand-icon-${i}"></i>
         <span id="expand-label-${i}">Show 30-day chart</span>
@@ -840,6 +925,16 @@ function renderPicks(data) {
       }
     });
   });
+}
+
+function toggleReport(i) {
+  const el    = document.getElementById(`full-report-${i}`);
+  const label = document.getElementById(`report-label-${i}`);
+  const icon  = document.getElementById(`report-icon-${i}`);
+  const isOpen = el.classList.contains('open');
+  el.classList.toggle('open', !isOpen);
+  label.textContent = isOpen ? 'Read full report' : 'Hide report';
+  icon.className = isOpen ? 'ti ti-file-text' : 'ti ti-x';
 }
 
 function toggleChart(i, ticker) {
