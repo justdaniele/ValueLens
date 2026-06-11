@@ -1,4 +1,6 @@
 import os
+import io
+import csv
 import json
 import time
 import logging
@@ -40,73 +42,86 @@ def _load_ticker_cik_map() -> dict:
         return {}
 
 
-def _get_recent_form4_accessions(cik: str, ticker: str, days_back: int = 90) -> list:
-    """Returns list of (accession_number, filing_date) for Form 4s in the lookback window."""
-    url    = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    cutoff = datetime.date.today() - datetime.timedelta(days=days_back)
+def _fetch_form4_index(year: int, quarter: int) -> list:
+    """Downloads the EDGAR quarterly full-index for Form 4 filings.
 
+    Returns list of (cik_padded, accession_no, date_filed) tuples.
+    The quarterly index is a ~5MB flat text file listing all filings —
+    far more efficient than per-ticker API calls.
+    """
+    url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
     try:
         resp = requests.get(url, headers=EDGAR_HEADERS, timeout=30)
         if resp.status_code != 200:
+            logger.warning(f"EDGAR index {year}/QTR{quarter} returned {resp.status_code}")
             return []
 
-        data    = resp.json()
-        filings = data.get("filings", {}).get("recent", {})
-        forms   = filings.get("form", [])
-        dates   = filings.get("filingDate", [])
-        accnums = filings.get("accessionNumber", [])
-
         results = []
-        for form, filed, acc in zip(forms, dates, accnums):
-            # Stop early once filings are older than the lookback window
-            # EDGAR returns filings in reverse chronological order
+        lines   = resp.text.splitlines()
+
+        # Skip header lines (first 9 lines are metadata/column headers)
+        for line in lines[9:]:
+            if not line.strip():
+                continue
+            # Fixed-width format: Form Type | Company | CIK | Date | Filename
+            # Form 4 lines start with "4 " at position 0
+            form_type = line[:12].strip()
+            if form_type != "4":
+                continue
             try:
-                filed_date = datetime.date.fromisoformat(filed)
-                if filed_date < cutoff:
-                    break  # All subsequent filings are older — stop scanning
-                if form == "4":
-                    results.append((acc.replace("-", ""), filed))
+                cik        = line[74:86].strip().zfill(10)
+                date_filed = line[86:98].strip()
+                filename   = line[98:].strip()
+                accession  = filename.split("/")[-1].replace(".txt", "").replace("-", "")
+                results.append((cik, accession, date_filed))
             except Exception:
                 pass
 
+        logger.info(f"EDGAR index {year}/QTR{quarter}: {len(results)} Form 4 filings found.")
         return results
 
     except Exception as e:
-        logger.debug(f"Submissions fetch failed for {ticker}: {e}")
+        logger.warning(f"EDGAR index fetch failed for {year}/QTR{quarter}: {e}")
         return []
+
+
+def _get_quarters_in_range(days_back: int = 90) -> list:
+    """Returns list of (year, quarter) tuples covering the lookback window."""
+    today   = datetime.date.today()
+    cutoff  = today - datetime.timedelta(days=days_back)
+    quarters = set()
+
+    d = cutoff
+    while d <= today:
+        q = (d.month - 1) // 3 + 1
+        quarters.add((d.year, q))
+        # Advance by ~32 days to hit next month safely
+        d = d.replace(day=28) + datetime.timedelta(days=4)
+        d = d.replace(day=1)
+
+    return sorted(quarters)
 
 
 def _parse_form4_xml(cik: str, accession: str) -> list:
     """Downloads and parses a Form 4 XML filing.
 
-    Returns list of dicts for open-market purchases (transaction code 'P') only:
+    Returns list of open-market purchase dicts (transaction code P only):
         insider_name, title, date, shares, price_per_share, total_value
     """
-    # Build the primary document URL
     acc_dashed = f"{accession[:10]}-{accession[10:12]}-{accession[12:]}"
-    base_url   = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession}/"
-    index_url  = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=4&dateb=&owner=include&count=10"
+    index_url  = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession}/{acc_dashed}-index.htm"
 
-    # Try the standard Form 4 XML filename patterns
-    xml_candidates = [
-        f"{base_url}form4.xml",
-        f"{base_url}0000{accession}-index.htm",
-    ]
-
-    # Fetch the filing index to find the actual XML file
-    index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession}/{acc_dashed}-index.htm"
     try:
         idx_resp = requests.get(index_url, headers=EDGAR_HEADERS, timeout=10)
-        if idx_resp.status_code == 200:
-            # Extract XML document link from index
-            import re
-            xml_match = re.search(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_resp.text)
-            if xml_match:
-                xml_url = "https://www.sec.gov" + xml_match.group(1)
-            else:
-                return []
-        else:
+        if idx_resp.status_code != 200:
             return []
+
+        import re
+        xml_match = re.search(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_resp.text)
+        if not xml_match:
+            return []
+        xml_url = "https://www.sec.gov" + xml_match.group(1)
+
     except Exception:
         return []
 
@@ -118,29 +133,22 @@ def _parse_form4_xml(cik: str, accession: str) -> list:
         root = ET.fromstring(xml_resp.content)
         purchases = []
 
-        # Extract insider identity
-        insider_name = ""
-        title        = ""
-
         name_el  = root.find(".//reportingOwner/reportingOwnerId/rptOwnerName")
         title_el = root.find(".//reportingOwner/reportingOwnerRelationship/officerTitle")
         is_dir   = root.find(".//reportingOwner/reportingOwnerRelationship/isDirector")
-        is_off   = root.find(".//reportingOwner/reportingOwnerRelationship/isOfficer")
 
-        if name_el is not None:
-            insider_name = name_el.text.strip().title()
+        insider_name = name_el.text.strip().title() if name_el is not None else ""
         if title_el is not None and title_el.text:
             title = title_el.text.strip()
         elif is_dir is not None and is_dir.text == "1":
             title = "Director"
-        elif is_off is not None and is_off.text == "1":
+        else:
             title = "Officer"
 
-        # Parse non-derivative transactions (open-market stock purchases)
         for tx in root.findall(".//nonDerivativeTransaction"):
             code_el = tx.find(".//transactionCoding/transactionCode")
             if code_el is None or code_el.text != "P":
-                continue  # Only open-market purchases (code P)
+                continue
 
             date_el   = tx.find(".//transactionDate/value")
             shares_el = tx.find(".//transactionAmounts/transactionShares/value")
@@ -151,7 +159,6 @@ def _parse_form4_xml(cik: str, accession: str) -> list:
                 shares  = float(shares_el.text) if shares_el is not None else 0.0
                 price   = float(price_el.text)  if price_el  is not None else 0.0
                 total   = shares * price
-
                 if total >= MIN_PURCHASE_VALUE:
                     purchases.append({
                         "insider_name": insider_name,
@@ -167,7 +174,7 @@ def _parse_form4_xml(cik: str, accession: str) -> list:
         return purchases
 
     except Exception as e:
-        logger.debug(f"XML parse failed for accession {accession}: {e}")
+        logger.debug(f"XML parse failed for {accession}: {e}")
         return []
 
 
@@ -175,12 +182,13 @@ def run_insider_tracking():
     """Scans the market universe for high-conviction C-suite open-market purchase footprints.
 
     Workflow:
-    1. Load ticker->CIK map from local company_tickers.json.
-    2. Fetch recent Form 4 accession numbers via EDGAR submissions API.
-    3. Parse each Form 4 XML for open-market purchase transactions (code P).
-    4. Fire Telegram alerts with insider name, title, shares, price, date.
+    1. Load ticker->CIK map from local company_tickers.json (zero network calls).
+    2. Download EDGAR quarterly index files (1-2 files, ~5MB each) covering last 90 days.
+    3. Build a CIK->[(accession, date)] map from all Form 4 entries in the index.
+    4. For each universe ticker with CIK hits, parse the Form 4 XML for P-code transactions.
+    5. Fire Telegram alerts with insider name, title, shares, price, and date.
     """
-    logger.info("Initializing Insider Tracking Engine (SEC EDGAR Form 4 XML parser)...")
+    logger.info("Initializing Insider Tracking Engine (EDGAR quarterly index mode)...")
     universe = get_us_market_universe()
     if not universe:
         logger.warning("Universe empty — aborting.")
@@ -191,59 +199,78 @@ def run_insider_tracking():
         logger.error("CIK map empty — aborting.")
         return
 
+    # Reverse map: CIK -> ticker (for matching index results back to tickers)
+    cik_to_ticker = {v: k for k, v in cik_map.items()}
+
+    # Step 1: Download quarterly index files covering the 90-day window
+    cutoff   = datetime.date.today() - datetime.timedelta(days=90)
+    quarters = _get_quarters_in_range(days_back=90)
+    logger.info(f"Fetching EDGAR index for quarters: {quarters}")
+
+    all_form4 = []
+    for year, qtr in quarters:
+        entries = _fetch_form4_index(year, qtr)
+        all_form4.extend(entries)
+        time.sleep(0.5)
+
+    if not all_form4:
+        logger.warning("No Form 4 entries found in EDGAR index — aborting.")
+        return
+
+    # Step 2: Filter to our universe and date range, build CIK->filings map
+    universe_ciks = {cik_map[t.upper()] for t in universe if t.upper() in cik_map}
+    cik_filings: dict = {}
+
+    for cik, accession, date_filed in all_form4:
+        if cik not in universe_ciks:
+            continue
+        try:
+            if datetime.date.fromisoformat(date_filed) < cutoff:
+                continue
+        except Exception:
+            continue
+        if cik not in cik_filings:
+            cik_filings[cik] = []
+        cik_filings[cik].append((accession, date_filed))
+
+    matched_tickers = len(cik_filings)
+    logger.info(f"Universe tickers with Form 4 filings in last 90 days: {matched_tickers}")
+
+    # Step 3: Process each matched ticker
     conn   = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    scanned      = 0
     alerts_fired = 0
 
-    for ticker in universe:
-        cik = cik_map.get(ticker.upper())
-        if not cik:
-            scanned += 1
+    for cik, filings in cik_filings.items():
+        ticker = cik_to_ticker.get(cik)
+        if not ticker or ticker not in [t.upper() for t in universe]:
             continue
 
         try:
             # Deduplication check
             cursor.execute("SELECT id FROM insider_signals WHERE ticker = ?", (ticker,))
             if cursor.fetchone():
-                scanned += 1
-                time.sleep(0.2)
                 continue
 
-            # Step 1: get Form 4 accession numbers
-            accessions = _get_recent_form4_accessions(cik, ticker, days_back=90)
-            if not accessions:
-                scanned += 1
-                time.sleep(0.2)
-                continue
-
-            # Step 2: parse each filing XML for real open-market purchases
+            # Parse XML for each filing (cap at 5 per ticker)
             all_purchases = []
-            for acc, filed_date in accessions[:10]:  # Cap at 10 filings per ticker
-                purchases = _parse_form4_xml(cik, acc)
+            for accession, date_filed in filings[:5]:
+                purchases = _parse_form4_xml(cik, accession)
                 all_purchases.extend(purchases)
-                time.sleep(0.2)  # Pacing between XML downloads
+                time.sleep(0.3)
 
             if not all_purchases:
-                scanned += 1
-                time.sleep(0.2)
                 continue
 
-            # Aggregate
             total_value      = sum(p["total_value"] for p in all_purchases)
             num_transactions = len(all_purchases)
 
             if total_value < MIN_PURCHASE_VALUE:
-                scanned += 1
-                time.sleep(0.2)
                 continue
 
-            # Fetch current price
             curr_price = yf.Ticker(ticker).fast_info.last_price
             if not curr_price:
-                scanned += 1
-                time.sleep(0.2)
                 continue
 
             # Persist signal
@@ -253,27 +280,26 @@ def run_insider_tracking():
             )
             conn.commit()
 
-            # Build transaction detail lines (top 3 by value)
+            # Build top-3 transaction detail lines
             top_txs = sorted(all_purchases, key=lambda x: x["total_value"], reverse=True)[:3]
-            detail_lines_en = []
-            detail_lines_it = []
+            lines_en, lines_it = [], []
             for p in top_txs:
-                name  = p["insider_name"] or "Insider"
-                role  = f" — {p['title']}" if p["title"] else ""
-                date  = p["date"]
-                val   = f"${p['total_value']:,.0f}"
+                name   = p["insider_name"] or "Insider"
+                role   = f" — {p['title']}" if p["title"] else ""
                 shares = f"{int(p['shares']):,}"
                 price  = f"${p['price']:.2f}"
-                detail_lines_en.append(f"• <b>{name}</b>{role}\n  {shares} shares @ {price} = {val} <i>({date})</i>")
-                detail_lines_it.append(f"• <b>{name}</b>{role}\n  {shares} azioni @ {price} = {val} <i>({date})</i>")
+                val    = f"${p['total_value']:,.0f}"
+                date   = p["date"]
+                lines_en.append(f"• <b>{name}</b>{role}\n  {shares} shares @ {price} = {val} <i>({date})</i>")
+                lines_it.append(f"• <b>{name}</b>{role}\n  {shares} azioni @ {price} = {val} <i>({date})</i>")
 
             remaining = num_transactions - len(top_txs)
             if remaining > 0:
-                detail_lines_en.append(f"<i>+ {remaining} other transaction(s)</i>")
-                detail_lines_it.append(f"<i>+ {remaining} altra/e transazione/i</i>")
+                lines_en.append(f"<i>+ {remaining} other transaction(s)</i>")
+                lines_it.append(f"<i>+ {remaining} altra/e transazione/i</i>")
 
-            detail_en = "\n".join(detail_lines_en)
-            detail_it = "\n".join(detail_lines_it)
+            detail_en = "\n".join(lines_en)
+            detail_it = "\n".join(lines_it)
 
             # Golden Combo check
             cursor.execute("""
@@ -286,7 +312,7 @@ def run_insider_tracking():
             if is_combo:
                 msg_en = (
                     f"🏆 <b>ValueLens Golden Combo Alert: {ticker}</b>\n\n"
-                    f"<b>AI Fundamental Match + SEC Form 4 Filing:</b>\n"
+                    f"<b>AI Fundamental Match + SEC Form 4:</b>\n"
                     f"Flagged as undervalued AND C-Suite is buying!\n\n"
                     f"{detail_en}\n\n"
                     f"• Total: <b>${total_value:,.0f}</b>\n"
@@ -315,16 +341,13 @@ def run_insider_tracking():
                 )
 
             send_alert_to_channel(msg_en, msg_it)
-            logger.info(f"Insider alert fired for {ticker} ({num_transactions} purchases, ${total_value:,.0f}, combo: {is_combo})")
+            logger.info(f"Insider alert fired for {ticker} ({num_transactions} buys, ${total_value:,.0f}, combo: {is_combo})")
             alerts_fired += 1
 
         except Exception as e:
-            logger.warning(f"Insider validation skipped for {ticker}: {e}")
+            logger.warning(f"Insider processing skipped for {ticker}: {e}")
 
-        scanned += 1
-        if scanned % 50 == 0:
-            logger.info(f"Progress: {scanned}/{len(universe)}, alerts: {alerts_fired}")
         time.sleep(0.3)
 
     conn.close()
-    logger.info(f"Insider tracking complete. Scanned: {scanned}, Alerts fired: {alerts_fired}")
+    logger.info(f"Insider tracking complete. Matched tickers: {matched_tickers}, Alerts fired: {alerts_fired}")
