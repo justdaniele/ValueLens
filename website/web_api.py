@@ -254,19 +254,10 @@ def _parse_report_sections(report_text: str) -> dict:
     # Strip HTML tags for cleaner section parsing
     clean = re.sub(r'<[^>]+>', '', report_text)
 
-    dcf_match     = re.search(r'Reverse DCF\s*
-(.+?)(?=
-\s*[🌀-🿿]|
-━|$)', clean, re.DOTALL | re.IGNORECASE)
-    zombie_match  = re.search(r'Zombie Detector\s*
-(.+?)(?=
-\s*[🌀-🿿]|
-━|$)', clean, re.DOTALL | re.IGNORECASE)
-    short_match   = re.search(r'Short Interest[^\n]*
-(.+?)(?=
-━|$)', clean, re.DOTALL | re.IGNORECASE)
-    verdict_match = re.search(r'Verdict:\s*(.+?)(?:
-|$)', clean, re.IGNORECASE)
+    dcf_match     = re.search(r"Reverse DCF[^\n]*\n(.+?)(?=\n[^\n]|\n━|$)", clean, re.DOTALL | re.IGNORECASE)
+    zombie_match  = re.search(r"Zombie Detector[^\n]*\n(.+?)(?=\n[^\n]|\n━|$)", clean, re.DOTALL | re.IGNORECASE)
+    short_match   = re.search(r"Short Interest[^\n]*\n(.+?)(?=\n━|$)", clean, re.DOTALL | re.IGNORECASE)
+    verdict_match = re.search(r"Verdict:\s*(.+?)(?:\n|$)", clean, re.IGNORECASE)
 
     if dcf_match:    sections["dcf"]     = dcf_match.group(1).strip()[:180]
     if zombie_match: sections["zombie"]  = zombie_match.group(1).strip()[:180]
