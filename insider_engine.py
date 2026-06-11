@@ -39,33 +39,27 @@ def _get_insider_buys(ticker: str, days_back: int = 90) -> list:
             if not required.issubset(df.columns):
                 return []
 
-        # Filter: only confirmed open-market purchases (Buy/Purchase keyword).
-        # Empty Transaction fields are RSU vesting, stock grants, or option exercises
-        # — not open-market conviction buys. Do NOT include them.
-        tx_col = df["Transaction"].astype(str).str.strip()
-        is_buy = tx_col.str.contains("Buy|Purchase", case=False, na=False)
-        buys   = df[is_buy]
+        # yfinance no longer populates the Transaction field reliably.
+        # Filter by value > MIN_PURCHASE_VALUE and positive shares as proxy for
+        # open-market purchases. Zero-value rows are RSU grants or option exercises.
         results = []
 
-        for _, row in buys.iterrows():
+        for _, row in df.iterrows():
             try:
                 tx_date = pd.to_datetime(row["Start Date"]).date()
-                val     = float(row["Value"])
                 if tx_date < cutoff or tx_date > today:
                     continue
-                # Skip zero or negative values — likely option exercises or gifts
-                if val < MIN_PURCHASE_VALUE:
+
+                val = float(row["Value"])
+                import math
+                if math.isnan(val) or val < MIN_PURCHASE_VALUE:
                     continue
+
+                shares = float(row.get("Shares", 0)) if "Shares" in row else 0.0
+                price  = val / shares if shares > 0 else 0.0
 
                 insider_name = str(row.get("Insider", "Insider")).strip().title()
                 title        = str(row.get("Position", "")).strip()
-                shares       = float(row.get("Shares", 0)) if "Shares" in row else 0.0
-                price        = val / shares if shares > 0 else 0.0
-
-                # Only include if value is a valid non-zero number
-                import math
-                if math.isnan(val) or val <= 0:
-                    continue
 
                 results.append({
                     "insider_name": insider_name,
@@ -228,14 +222,17 @@ def run_insider_tracking():
     conn   = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    alerts_fired      = 0
-    scanned           = 0
+    alerts_fired       = 0
+    scanned            = 0
     MAX_ALERTS_PER_RUN = int(os.environ.get("INSIDER_MAX_ALERTS", "5"))
 
     for ticker in scan_list:
-        if alerts_fired >= MAX_ALERTS_PER_RUN:
-            logger.info(f"Max alerts per run ({MAX_ALERTS_PER_RUN}) reached — stopping scan.")
-            break
+        is_winner = ticker.upper() in nightly_winners
+        # Winners (potential Golden Combo) always processed — no cap applies
+        # Random sample stops after MAX_ALERTS_PER_RUN non-combo alerts
+        if not is_winner and alerts_fired >= MAX_ALERTS_PER_RUN:
+            logger.info(f"Max non-combo alerts ({MAX_ALERTS_PER_RUN}) reached — winners still processing.")
+            continue
         try:
             fired = _process_ticker(ticker.upper(), universe_set, nightly_winners, cursor, conn)
             if fired:
