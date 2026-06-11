@@ -59,19 +59,29 @@ def _fetch_form4_index(year: int, quarter: int) -> list:
         results = []
         lines   = resp.text.splitlines()
 
-        # Skip header lines (first 9 lines are metadata/column headers)
-        for line in lines[9:]:
+        # Skip header lines — find the separator line "-----" and start after it
+        data_start = 0
+        for i, line in enumerate(lines):
+            if line.startswith("-----"):
+                data_start = i + 1
+                break
+
+        for line in lines[data_start:]:
             if not line.strip():
                 continue
-            # Fixed-width format: Form Type | Company | CIK | Date | Filename
-            # Form 4 lines start with "4 " at position 0
-            form_type = line[:12].strip()
+            # Columns: Form Type | Company Name | CIK | Date Filed | File Name
+            # Split on 2+ spaces to handle variable-length company names
+            import re
+            parts = re.split(r'  +', line.strip())
+            if len(parts) < 5:
+                continue
+            form_type = parts[0].strip()
             if form_type != "4":
                 continue
             try:
-                cik        = line[74:86].strip().zfill(10)
-                date_filed = line[86:98].strip()
-                filename   = line[98:].strip()
+                cik        = parts[2].strip().zfill(10)
+                date_filed = parts[3].strip()
+                filename   = parts[4].strip()
                 accession  = filename.split("/")[-1].replace(".txt", "").replace("-", "")
                 results.append((cik, accession, date_filed))
             except Exception:
