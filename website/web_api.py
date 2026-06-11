@@ -198,14 +198,21 @@ def picks():
     for ticker, d in by_ticker.items():
         upside = _compute_upside(d["price"], d["target"])
 
-        # Derive a display score from upside (capped 0-99)
-        score = 50
-        try:
-            if upside:
-                pct = float(upside.replace("+", "").replace("%", ""))
-                score = min(99, max(30, int(50 + pct * 0.8)))
-        except ValueError:
-            pass
+        # Extract real Opportunity Score from AI report text
+        score = _parse_opportunity_score(d["report_en"] or "")
+        if score == 0:
+            # Fallback: derive from upside if AI score not found
+            try:
+                if upside:
+                    pct = float(upside.replace("+", "").replace("%", ""))
+                    score = min(99, max(30, int(50 + pct * 0.8)))
+                else:
+                    score = 50
+            except ValueError:
+                score = 50
+
+        # Parse structured sections from EN report for card display
+        sections = _parse_report_sections(d["report_en"] or "")
 
         # Build signal tags from report keywords
         signals = _extract_signals(d["report_en"] or "")
@@ -219,12 +226,54 @@ def picks():
             "score": score,
             "report_en": d["report_en"],
             "report_it": d["report_it"],
-            "signals": signals
+            "signals": signals,
+            "sections": sections
         })
 
     # Sort by score descending, limit to top 10
     result.sort(key=lambda x: x["score"], reverse=True)
     return jsonify(result[:10])
+
+
+def _parse_opportunity_score(report_text: str) -> int:
+    """Extracts the Opportunity Score integer from the AI report text."""
+    import re
+    match = re.search(r'Opportunity Score[:\s]*(\d{1,3})\s*/\s*100', report_text, re.IGNORECASE)
+    if match:
+        return min(99, max(1, int(match.group(1))))
+    return 0
+
+
+def _parse_report_sections(report_text: str) -> dict:
+    """Splits the AI report into named sections for structured display."""
+    import re
+    sections = {"dcf": "", "zombie": "", "short": "", "verdict": ""}
+    if not report_text:
+        return sections
+
+    # Strip HTML tags for cleaner section parsing
+    clean = re.sub(r'<[^>]+>', '', report_text)
+
+    dcf_match     = re.search(r'Reverse DCF\s*
+(.+?)(?=
+\s*[🌀-🿿]|
+━|$)', clean, re.DOTALL | re.IGNORECASE)
+    zombie_match  = re.search(r'Zombie Detector\s*
+(.+?)(?=
+\s*[🌀-🿿]|
+━|$)', clean, re.DOTALL | re.IGNORECASE)
+    short_match   = re.search(r'Short Interest[^\n]*
+(.+?)(?=
+━|$)', clean, re.DOTALL | re.IGNORECASE)
+    verdict_match = re.search(r'Verdict:\s*(.+?)(?:
+|$)', clean, re.IGNORECASE)
+
+    if dcf_match:    sections["dcf"]     = dcf_match.group(1).strip()[:180]
+    if zombie_match: sections["zombie"]  = zombie_match.group(1).strip()[:180]
+    if short_match:  sections["short"]   = short_match.group(1).strip()[:180]
+    if verdict_match: sections["verdict"] = verdict_match.group(1).strip()[:200]
+
+    return sections
 
 
 def _extract_signals(report_text: str) -> list:

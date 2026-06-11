@@ -233,6 +233,13 @@ nav {
 .pick-report-text { font-size: 12px; color: var(--text-muted); line-height: 1.7; }
 
 /* Card chart toggle */
+/* ─── Pick indicator sections ─── */
+.pick-indicators { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 4px; }
+.pick-indicator { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.pick-ind-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.02em; }
+.pick-ind-text { font-size: 12px; color: var(--fg); line-height: 1.5; }
+.pick-verdict { font-size: 12px; color: var(--green); font-style: italic; padding: 8px 12px; border-left: 2px solid var(--green); margin-top: 2px; line-height: 1.5; }
+
 .pick-expand-btn {
   width: 100%; padding: 8px; background: transparent; border: none;
   border-top: 1px solid var(--border); color: var(--text-muted);
@@ -725,9 +732,11 @@ function renderPicks(data) {
     const barClass  = isAmber ? 'amber' : '';
     const upPctClass = isAmber ? 'amber' : '';
 
-    const reportRaw   = p.report_en || '';
-    const reportClean = reportRaw.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
-    const preview     = reportClean.length > 200 ? reportClean.slice(0, 200).trimEnd() + '…' : reportClean;
+    const sec = p.sections || {};
+    const dcfText     = sec.dcf     || '';
+    const zombieText  = sec.zombie  || '';
+    const shortText   = sec.short   || '';
+    const verdictText = sec.verdict || '';
 
     return `
     <div class="pick-card" id="pick-${i}">
@@ -774,9 +783,20 @@ function renderPicks(data) {
           <div class="bar-fill ${barClass}" id="bar-${i}" style="width:0%"></div>
         </div>
       </div>
-      <div class="pick-report">
-        <div class="pick-report-label"><i class="ti ti-robot" style="font-size:10px"></i> AI analysis</div>
-        <div class="pick-report-text">${preview}</div>
+      <div class="pick-indicators">
+        <div class="pick-indicator">
+          <div class="pick-ind-label">📉 Reverse DCF</div>
+          <div class="pick-ind-text">${dcfText || '—'}</div>
+        </div>
+        <div class="pick-indicator">
+          <div class="pick-ind-label">🧟 Zombie Detector</div>
+          <div class="pick-ind-text">${zombieText || '—'}</div>
+        </div>
+        <div class="pick-indicator">
+          <div class="pick-ind-label">🎯 Short Interest</div>
+          <div class="pick-ind-text">${shortText || '—'}</div>
+        </div>
+        ${verdictText ? `<div class="pick-verdict">💎 ${verdictText}</div>` : ''}
       </div>
       <button class="pick-expand-btn" onclick="toggleChart(${i}, '${p.ticker}')">
         <i class="ti ti-chart-line" id="expand-icon-${i}"></i>
