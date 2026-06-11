@@ -249,9 +249,9 @@ nav {
   display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
 }
 .pick-ind-icon {
-  width: 26px; height: 26px; border-radius: 7px;
+  width: 28px; height: 28px; border-radius: 7px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; flex-shrink: 0;
+  flex-shrink: 0;
 }
 .ind-dcf    .pick-ind-icon { background: rgba(59,130,246,0.15); }
 .ind-zombie .pick-ind-icon { background: rgba(220,38,38,0.12); }
@@ -269,27 +269,33 @@ nav {
 
 /* Bull / Bear sentiment bar */
 .sentiment-bar-wrap {
-  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  display: flex; align-items: center; gap: 10px; margin-top: 10px;
 }
-.sentiment-label {
-  font-size: 16px; flex-shrink: 0;
+.sentiment-icon {
+  flex-shrink: 0; display: flex; align-items: center; opacity: 0.9;
 }
 .sentiment-track {
-  flex: 1; height: 7px; background: var(--bg);
+  flex: 1; height: 6px; background: rgba(255,255,255,0.06);
   border-radius: 99px; position: relative; overflow: visible;
+}
+.sentiment-center-line {
+  position: absolute; left: 50%; top: -3px;
+  width: 1px; height: 12px;
+  background: rgba(255,255,255,0.15);
+  transform: translateX(-50%);
 }
 .sentiment-fill {
   position: absolute; top: 0; height: 100%;
   border-radius: 99px;
-  transition: left 0.9s cubic-bezier(.4,0,.2,1), width 0.9s cubic-bezier(.4,0,.2,1),
-              background 0.9s;
+  transition: left 1s cubic-bezier(.4,0,.2,1), width 1s cubic-bezier(.4,0,.2,1), background 1s;
+  opacity: 0.7;
 }
 .sentiment-dot {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 0 6px rgba(0,0,0,0.5);
-  transition: left 0.9s cubic-bezier(.4,0,.2,1), background 0.9s;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  transition: left 1s cubic-bezier(.4,0,.2,1), background 1s;
+  z-index: 2;
 }
 
 /* Verdict */
@@ -805,24 +811,44 @@ async function loadPicks() {
 }
 
 
+// SVG icons for cyberpunk bear and bull
+const BEAR_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="7" cy="5" r="2.5" stroke="#DC2626" stroke-width="1.5"/>
+  <circle cx="17" cy="5" r="2.5" stroke="#DC2626" stroke-width="1.5"/>
+  <path d="M4 10C4 7.8 5.8 6 8 6h8c2.2 0 4 1.8 4 4v5c0 2.2-1.8 4-4 4H8c-2.2 0-4-1.8-4-4v-5z" stroke="#DC2626" stroke-width="1.5"/>
+  <path d="M9 14c0 0 1 1.5 3 1.5s3-1.5 3-1.5" stroke="#DC2626" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="9.5" cy="11" r="1" fill="#DC2626"/>
+  <circle cx="14.5" cy="11" r="1" fill="#DC2626"/>
+  <path d="M12 18v3M8 20l4-2 4 2" stroke="#DC2626" stroke-width="1.5" stroke-linecap="round"/>
+</svg>`;
+
+const BULL_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M3 5c0 0 2-1 4 1M21 5c0 0-2-1-4 1" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M7 6c0 0-2 0-3 2s0 4 2 4M17 6c0 0 2 0 3 2s0 4-2 4" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M7 8h10a3 3 0 0 1 3 3v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-4a3 3 0 0 1 3-3z" stroke="#1D9E75" stroke-width="1.5"/>
+  <path d="M9.5 14c0 0 1 1.5 2.5 1.5s2.5-1.5 2.5-1.5" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="9.5" cy="11.5" r="1" fill="#1D9E75"/>
+  <circle cx="14.5" cy="11.5" r="1" fill="#1D9E75"/>
+</svg>`;
+
 function sentimentBar(score) {
-  // score: -10 (bear) to +10 (bull)
-  // Map to 0-100% position: center=50%, full bear=5%, full bull=95%
-  const pct     = ((score + 10) / 20) * 90 + 5;  // 5% to 95%
-  const isBull  = score >= 0;
-  const color   = isBull ? 'var(--green)' : 'var(--red)';
-  // Fill: from center(50%) toward dot position
-  const center  = 50;
-  const left    = Math.min(pct, center);
-  const width   = Math.abs(pct - center);
+  // score: -10 (bear) to +10 (bull), 0 = neutral center
+  const pct    = ((score + 10) / 20) * 90 + 5;  // maps to 5%-95%
+  const isBull = score >= 0;
+  const color  = isBull ? 'var(--green)' : 'var(--red)';
+  const glow   = isBull ? 'rgba(29,158,117,0.5)' : 'rgba(220,38,38,0.5)';
+  const center = 50;
+  const left   = Math.min(pct, center);
+  const width  = Math.abs(pct - center);
   return `
     <div class="sentiment-bar-wrap">
-      <span class="sentiment-label bear">🐻</span>
+      <span class="sentiment-icon bear">${BEAR_SVG}</span>
       <div class="sentiment-track">
+        <div class="sentiment-center-line"></div>
         <div class="sentiment-fill" style="left:${left}%;width:${width}%;background:${color}"></div>
-        <div class="sentiment-dot"  style="left:calc(${pct}% - 4px);background:${color}"></div>
+        <div class="sentiment-dot" style="left:calc(${pct}% - 6px);background:${color};box-shadow:0 0 8px ${glow}"></div>
       </div>
-      <span class="sentiment-label bull">🐂</span>
+      <span class="sentiment-icon bull">${BULL_SVG}</span>
     </div>`;
 }
 
@@ -907,7 +933,11 @@ function renderPicks(data) {
       <div class="pick-indicators">
         <div class="pick-indicator ind-dcf">
           <div class="pick-ind-header">
-            <div class="pick-ind-icon">📉</div>
+            <div class="pick-ind-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
+              </svg>
+            </div>
             <div class="pick-ind-label">Reverse DCF</div>
           </div>
           <div class="pick-ind-text">${dcfText || '—'}</div>
@@ -915,7 +945,12 @@ function renderPicks(data) {
         </div>
         <div class="pick-indicator ind-zombie">
           <div class="pick-ind-header">
-            <div class="pick-ind-icon">🧟</div>
+            <div class="pick-ind-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
             <div class="pick-ind-label">Zombie Detector</div>
           </div>
           <div class="pick-ind-text">${zombieText || '—'}</div>
@@ -923,7 +958,11 @@ function renderPicks(data) {
         </div>
         <div class="pick-indicator ind-short">
           <div class="pick-ind-header">
-            <div class="pick-ind-icon">🎯</div>
+            <div class="pick-ind-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+              </svg>
+            </div>
             <div class="pick-ind-label">Short Interest</div>
           </div>
           <div class="pick-ind-text">${shortText || '—'}</div>
