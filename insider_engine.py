@@ -39,7 +39,14 @@ def _get_insider_buys(ticker: str, days_back: int = 90) -> list:
             if not required.issubset(df.columns):
                 return []
 
-        buys = df[df["Transaction"].astype(str).str.contains("Buy|Purchase", case=False, na=False)]
+        # Filter: include rows where Transaction contains Buy/Purchase OR is empty/NaN
+        # (yfinance stopped populating Transaction for many tickers — empty = unclassified)
+        tx_col = df["Transaction"].astype(str).str.strip()
+        is_buy = (
+            tx_col.str.contains("Buy|Purchase", case=False, na=False) |
+            tx_col.isin(["", "nan", "None", "-"])
+        )
+        buys = df[is_buy]
         results = []
 
         for _, row in buys.iterrows():
@@ -48,6 +55,7 @@ def _get_insider_buys(ticker: str, days_back: int = 90) -> list:
                 val     = float(row["Value"])
                 if tx_date < cutoff or tx_date > today:
                     continue
+                # Skip zero or negative values — likely option exercises or gifts
                 if val < MIN_PURCHASE_VALUE:
                     continue
 
