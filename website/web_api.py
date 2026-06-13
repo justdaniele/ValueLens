@@ -469,7 +469,7 @@ def golden_combos():
 @app.route("/api/earnings")
 def earnings():
     """Returns recent earnings sniper predictions with evaluation status."""
-    conn = _db()
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT ticker, price_at_signal, prediction, is_evaluated, timestamp
