@@ -466,6 +466,38 @@ def golden_combos():
 # /api/subscribe — email capture
 # ─────────────────────────────────────────────
 
+@app.route("/api/insider_transactions/<ticker>")
+def insider_transactions(ticker):
+    """Returns transaction details for a specific ticker on-demand (called when user expands row)."""
+    import pandas as pd, math, datetime as dt
+    cutoff = dt.date.today() - dt.timedelta(days=90)
+    transactions = []
+    try:
+        df = yf.Ticker(ticker.upper()).insider_transactions
+        if df is not None and not df.empty and "Value" in df.columns:
+            for _, row in df.iterrows():
+                try:
+                    tx_date = pd.to_datetime(row["Start Date"]).date()
+                    val     = float(row["Value"])
+                    if math.isnan(val) or val < 500000 or tx_date < cutoff:
+                        continue
+                    shares = float(row.get("Shares", 0)) if "Shares" in row else 0.0
+                    price  = val / shares if shares > 0 else 0.0
+                    transactions.append({
+                        "insider_name": str(row.get("Insider", "")).strip().title(),
+                        "title":        str(row.get("Position", "")).strip(),
+                        "date":         str(tx_date),
+                        "shares":       shares,
+                        "price":        round(price, 2),
+                        "total_value":  val,
+                    })
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return jsonify(transactions[:5])
+
+
 @app.route("/api/earnings")
 def earnings():
     """Returns recent earnings sniper predictions with evaluation status."""
