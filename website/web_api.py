@@ -387,15 +387,49 @@ def insiders():
     conn.close()
 
     result = []
+    ninety_days_ago = (datetime.datetime.now() - datetime.timedelta(days=90)).date()
+
     for r in rows:
-        tv = r["total_value"] if r["total_value"] else 0.0
+        tv  = r["total_value"] if r["total_value"] else 0.0
+        ntx = r["num_transactions"] if r["num_transactions"] else 0
+
+        # Fetch transaction details from yfinance for the expand view
+        transactions = []
+        try:
+            import pandas as pd, math
+            df = yf.Ticker(r["ticker"]).insider_transactions
+            if df is not None and not df.empty and "Value" in df.columns:
+                for _, row in df.iterrows():
+                    try:
+                        tx_date = pd.to_datetime(row["Start Date"]).date()
+                        val     = float(row["Value"])
+                        if math.isnan(val) or val < 500000:
+                            continue
+                        if tx_date < ninety_days_ago:
+                            continue
+                        shares = float(row.get("Shares", 0)) if "Shares" in row else 0.0
+                        price  = val / shares if shares > 0 else 0.0
+                        transactions.append({
+                            "insider_name": str(row.get("Insider", "")).strip().title(),
+                            "title":        str(row.get("Position", "")).strip(),
+                            "date":         str(tx_date),
+                            "shares":       shares,
+                            "price":        round(price, 2),
+                            "total_value":  val,
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         result.append({
             "ticker":           r["ticker"],
             "date_detected":    r["date_detected"],
             "price_detected":   r["price_detected"],
-            "num_transactions": r["num_transactions"] or 0,
+            "num_transactions": ntx,
             "total_value":      tv if tv > 0 else None,
             "value_formatted":  f"${tv:,.0f}" if tv and tv > 0 else None,
+            "transactions":     transactions[:5],
             "status":           r["status"],
         })
     return jsonify(result)

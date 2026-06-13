@@ -371,6 +371,20 @@ nav {
 /* ─── Insider table ─── */
 .insider-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--rl); overflow: hidden; }
 .insider-table { width: 100%; border-collapse: collapse; }
+.insider-row-main { cursor: pointer; transition: background 0.15s; }
+.insider-row-main:hover td { background: rgba(255,255,255,0.03) !important; }
+.insider-row-main td:first-child { padding-left: 12px; }
+.insider-chevron { transition: transform 0.2s; display: inline-block; color: var(--text-muted); font-size: 10px; margin-left: 6px; }
+.insider-chevron.open { transform: rotate(90deg); }
+.insider-detail-row { display: none; }
+.insider-detail-row.open { display: table-row; }
+.insider-detail-cell { padding: 0 !important; border-bottom: 1px solid var(--border) !important; }
+.insider-detail-inner { padding: 12px 16px 14px 36px; display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.15); }
+.insider-tx { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
+.insider-tx-name { font-weight: 600; color: var(--text); min-width: 160px; }
+.insider-tx-role { color: var(--text-muted); font-size: 11px; }
+.insider-tx-detail { color: var(--text); font-family: var(--mono); font-size: 11px; }
+.insider-tx-date { color: var(--text-muted); font-size: 11px; margin-left: auto; }
 .insider-table th {
   font-size: 9px; font-family: var(--mono); color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.08em;
@@ -616,7 +630,7 @@ footer {
         <div class="section-icon si-amber"><i class="ti ti-user-dollar"></i></div>
         <div>
           <div class="section-title">Recent insider buys</div>
-          <div class="section-sub">C-suite open-market purchases · last 14 days · price change updated during market hours</div>
+          <div class="section-sub">C-suite open-market purchases · last 90 days · price change updated during market hours</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
@@ -826,6 +840,24 @@ async function loadPicks() {
   }
 }
 
+// Known NASDAQ-100 tickers for exchange label display
+const NASDAQ_TICKERS = new Set([
+  'AAPL','MSFT','NVDA','AMZN','META','TSLA','GOOGL','GOOG','AVGO','COST',
+  'NFLX','AMD','ADBE','QCOM','TMUS','INTC','INTU','CSCO','AMAT','TXN',
+  'AMGN','HON','BKNG','SBUX','GILD','ADI','VRTX','REGN','ISRG','MDLZ',
+  'LRCX','KLAC','SNPS','CDNS','MRVL','PANW','CRWD','FTNT','ORLY','ABNB',
+  'CTAS','MCHP','KDP','DXCM','CEG','FANG','EXC','AEP','IDXX','MRNA',
+  'TTD','ROST','GEHC','FAST','ODFL','VRSK','MNST','BIIB','ANSS','DLTR',
+  'ZS','PCAR','ON','GFS','SMCI','CHTR','DDOG','TEAM','WDAY','ILMN',
+  'ALGN','SGEN','NXPI','CDNS','ASML','AZN','PEP','PYPL','PAYX','CPRT',
+  'LULU','EBAY','SPLK','RIVN','LCID','SIRI','ZBRA','SWKS','QCOM','MELI',
+  'HOOD','APP','PLTR','COIN','RBLX','NET','SNOW','OKTA','MDB','ZM',
+]);
+
+function getExchangeLabel(ticker) {
+  return NASDAQ_TICKERS.has(ticker.toUpperCase()) ? 'NASDAQ' : 'NYSE';
+}
+
 function renderPicks(data) {
   const el = document.getElementById('picks-grid');
   if (!data.length) {
@@ -866,7 +898,7 @@ function renderPicks(data) {
           <div class="pick-avatar">${p.ticker.slice(0, 2)}</div>
           <div>
             <div class="pick-sym">${p.ticker}</div>
-            <div class="pick-name">${p.name || ''}</div>
+            <div class="pick-name">${getExchangeLabel(p.ticker)}: ${p.ticker}</div>
           </div>
         </div>
         <div class="score-ring ${ringClass}" aria-label="AI score ${score} out of 100">
@@ -1077,7 +1109,7 @@ async function loadInsiders() {
     insiderData = data;
     document.getElementById('insider-count').textContent = `${data.length} signals`;
     if (!data.length) {
-      wrap.innerHTML = '<div class="empty-state">No insider signals in the last 14 days.</div>';
+      wrap.innerHTML = '<div class="empty-state">No insider signals detected in the last 90 days.</div>';
       return;
     }
     renderInsiderTable();
@@ -1108,27 +1140,71 @@ async function fetchInsiderLivePrices() {
   }
 }
 
+function toggleInsiderRow(idx) {
+  const detail = document.getElementById(`insider-detail-${idx}`);
+  const chev   = document.getElementById(`insider-chev-${idx}`);
+  if (!detail) return;
+  const isOpen = detail.classList.contains('open');
+  detail.classList.toggle('open', !isOpen);
+  if (chev) chev.classList.toggle('open', !isOpen);
+}
+
 function renderInsiderTable() {
   const wrap = document.getElementById('insiders-wrap');
-  const rows = insiderData.map(r => {
+  let tbody = '';
+
+  insiderData.forEach((r, idx) => {
     const signalPrice = parseFloat(r.price_detected);
     const livePrice   = insiderLivePrices[r.ticker];
+
     let changeCell = '<span class="it-chg-neu">—</span>';
     if (livePrice && signalPrice > 0) {
-      const pct = ((livePrice - signalPrice) / signalPrice) * 100;
+      const pct  = ((livePrice - signalPrice) / signalPrice) * 100;
       const sign = pct >= 0 ? '+' : '';
       const cls  = pct >= 0 ? 'it-chg-pos' : 'it-chg-neg';
       changeCell = `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>`;
     }
-    return `<tr>
-      <td><span class="it-ticker mono">${r.ticker}</span></td>
+
+    const valueStr = r.value_formatted || '—';
+    const txCount  = r.num_transactions || 0;
+    const hasDetail = txCount > 0;
+
+    // Main row
+    tbody += `<tr class="insider-row-main" onclick="${hasDetail ? `toggleInsiderRow(${idx})` : ''}">
+      <td>
+        <span class="it-ticker mono">${r.ticker}</span>
+        ${hasDetail ? `<span class="insider-chevron" id="insider-chev-${idx}">▶</span>` : ''}
+      </td>
       <td><span class="it-badge it-buy">BUY</span></td>
-      <td><span class="it-val">${r.value || '—'}</span></td>
+      <td><span class="it-val">${valueStr}</span></td>
       <td><span class="it-price">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
       <td>${changeCell}</td>
       <td><span class="it-date">${r.date_detected || '—'}</span></td>
     </tr>`;
-  }).join('');
+
+    // Detail row — transactions
+    if (hasDetail && r.transactions && r.transactions.length > 0) {
+      const txLines = r.transactions.map(tx => {
+        const name   = tx.insider_name || 'Insider';
+        const role   = tx.title ? `<span class="insider-tx-role"> — ${tx.title}</span>` : '';
+        const shares = tx.shares > 0 ? `${Number(tx.shares).toLocaleString()} shares` : '';
+        const price  = tx.price > 0 ? ` @ $${tx.price.toFixed(2)}` : '';
+        const val    = tx.total_value > 0 ? ` = $${Number(tx.total_value).toLocaleString(undefined, {maximumFractionDigits:0})}` : '';
+        const date   = tx.date || '';
+        return `<div class="insider-tx">
+          <span class="insider-tx-name">${name}${role}</span>
+          <span class="insider-tx-detail">${shares}${price}${val}</span>
+          <span class="insider-tx-date">${date}</span>
+        </div>`;
+      }).join('');
+
+      tbody += `<tr class="insider-detail-row" id="insider-detail-${idx}">
+        <td class="insider-detail-cell" colspan="6">
+          <div class="insider-detail-inner">${txLines}</div>
+        </td>
+      </tr>`;
+    }
+  });
 
   wrap.innerHTML = `
     <table class="insider-table">
@@ -1136,13 +1212,13 @@ function renderInsiderTable() {
         <tr>
           <th>Ticker</th>
           <th>Type</th>
-          <th>Insider value</th>
-          <th>Price at signal</th>
-          <th>Change since signal</th>
+          <th>Insider Value</th>
+          <th>Price at Signal</th>
+          <th>Change Since Signal</th>
           <th>Detected</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${tbody}</tbody>
     </table>`;
 }
 
