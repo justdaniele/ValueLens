@@ -189,8 +189,13 @@ def picks():
             }
         if r["lang"] == "en":
             by_ticker[t]["report_en"] = r["report_text"]
-            by_ticker[t]["price"] = r["current_price"]
+            by_ticker[t]["price"]  = r["current_price"]
             by_ticker[t]["target"] = r["target_price"]
+            try:
+                pe_val = yf.Ticker(t).info.get("trailingPE")
+                by_ticker[t]["pe"] = round(float(pe_val), 1) if pe_val else None
+            except Exception:
+                by_ticker[t]["pe"] = None
         elif r["lang"] == "it":
             by_ticker[t]["report_it"] = r["report_text"]
 
@@ -225,6 +230,7 @@ def picks():
             "target": d["target"],
             "upside": upside,
             "score": score,
+            "pe": d.get("pe"),
             "report_en": d["report_en"],
             "report_it": d["report_it"],
             "signals": signals,
@@ -387,49 +393,15 @@ def insiders():
     conn.close()
 
     result = []
-    ninety_days_ago = (datetime.datetime.now() - datetime.timedelta(days=90)).date()
-
     for r in rows:
-        tv  = r["total_value"] if r["total_value"] else 0.0
-        ntx = r["num_transactions"] if r["num_transactions"] else 0
-
-        # Fetch transaction details from yfinance for the expand view
-        transactions = []
-        try:
-            import pandas as pd, math
-            df = yf.Ticker(r["ticker"]).insider_transactions
-            if df is not None and not df.empty and "Value" in df.columns:
-                for _, row in df.iterrows():
-                    try:
-                        tx_date = pd.to_datetime(row["Start Date"]).date()
-                        val     = float(row["Value"])
-                        if math.isnan(val) or val < 500000:
-                            continue
-                        if tx_date < ninety_days_ago:
-                            continue
-                        shares = float(row.get("Shares", 0)) if "Shares" in row else 0.0
-                        price  = val / shares if shares > 0 else 0.0
-                        transactions.append({
-                            "insider_name": str(row.get("Insider", "")).strip().title(),
-                            "title":        str(row.get("Position", "")).strip(),
-                            "date":         str(tx_date),
-                            "shares":       shares,
-                            "price":        round(price, 2),
-                            "total_value":  val,
-                        })
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
+        tv = r["total_value"] if r["total_value"] else 0.0
         result.append({
             "ticker":           r["ticker"],
             "date_detected":    r["date_detected"],
             "price_detected":   r["price_detected"],
-            "num_transactions": ntx,
+            "num_transactions": r["num_transactions"] or 0,
             "total_value":      tv if tv > 0 else None,
             "value_formatted":  f"${tv:,.0f}" if tv and tv > 0 else None,
-            "transactions":     transactions[:5],
             "status":           r["status"],
         })
     return jsonify(result)
@@ -493,6 +465,46 @@ def golden_combos():
 # ─────────────────────────────────────────────
 # /api/subscribe — email capture
 # ─────────────────────────────────────────────
+
+@app.route("/api/earnings")
+def earnings():
+    """Returns recent earnings sniper predictions with evaluation status."""
+    conn = _db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ticker, price_at_signal, prediction, is_evaluated, timestamp
+        FROM earnings_predictions
+        ORDER BY timestamp DESC
+        LIMIT 30
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = []
+    for r in rows:
+        # Fetch current price for live change calculation
+        curr_price = None
+        try:
+            curr_price = yf.Ticker(r["ticker"]).fast_info.last_price
+        except Exception:
+            pass
+
+        signal_price = r["price_at_signal"] or 0
+        change_pct = None
+        if curr_price and signal_price > 0:
+            change_pct = round(((curr_price - signal_price) / signal_price) * 100, 2)
+
+        result.append({
+            "ticker":        r["ticker"],
+            "prediction":    r["prediction"],
+            "price_signal":  signal_price,
+            "price_current": round(curr_price, 2) if curr_price else None,
+            "change_pct":    change_pct,
+            "is_evaluated":  bool(r["is_evaluated"]),
+            "timestamp":     r["timestamp"][:10] if r["timestamp"] else None,
+        })
+    return jsonify(result)
+
 
 @app.route("/api/subscribe", methods=["POST"])
 def subscribe():

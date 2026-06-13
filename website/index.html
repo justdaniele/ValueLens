@@ -385,6 +385,8 @@ nav {
 .insider-tx-role { color: var(--text-muted); font-size: 11px; }
 .insider-tx-detail { color: var(--text); font-family: var(--mono); font-size: 11px; }
 .insider-tx-date { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+.insider-tx-sec { color: var(--green); font-size: 10px; font-weight: 600; text-decoration: none; margin-left: 10px; opacity: 0.7; transition: opacity 0.2s; flex-shrink: 0; }
+.insider-tx-sec:hover { opacity: 1; }
 .insider-table th {
   font-size: 9px; font-family: var(--mono); color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.08em;
@@ -622,6 +624,23 @@ footer {
   </div>
 </section>
 
+<!-- Earnings Sniper -->
+<section class="picks-section" id="earnings" style="margin-bottom: 60px;">
+  <div class="picks-header">
+    <div class="picks-header-left">
+      <div class="section-icon-wrap" style="background:rgba(139,92,246,0.15)">
+        <i class="ti ti-target" style="color:#8B5CF6;font-size:16px"></i>
+      </div>
+      <div>
+        <div class="picks-title">Earnings Sniper</div>
+        <div class="picks-sub">AI directional predictions triggered 48h before earnings</div>
+      </div>
+    </div>
+    <span class="picks-count-badge" id="earnings-count">loading...</span>
+  </div>
+  <div id="earnings-wrap"></div>
+</section>
+
 <!-- Insider Buys -->
 <section class="section" id="insiders">
   <div class="section-inner">
@@ -801,7 +820,7 @@ async function fetchJSON(endpoint) {
 // ─── Load all sections ───
 async function loadAll() {
   updateMarketStatusBadge();
-  await Promise.all([loadMeta(), loadPicks(), loadInsiders(), loadCombos()]);
+  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos()]);
 }
 
 function countUp(el, target, suffix, duration) {
@@ -1191,10 +1210,12 @@ function renderInsiderTable() {
         const price  = tx.price > 0 ? ` @ $${tx.price.toFixed(2)}` : '';
         const val    = tx.total_value > 0 ? ` = $${Number(tx.total_value).toLocaleString(undefined, {maximumFractionDigits:0})}` : '';
         const date   = tx.date || '';
+        const secUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${r.ticker}&type=4&owner=include&count=10`;
         return `<div class="insider-tx">
           <span class="insider-tx-name">${name}${role}</span>
           <span class="insider-tx-detail">${shares}${price}${val}</span>
           <span class="insider-tx-date">${date}</span>
+          <a class="insider-tx-sec" href="${secUrl}" target="_blank" rel="noopener">SEC ↗</a>
         </div>`;
       }).join('');
 
