@@ -106,14 +106,14 @@ def meta():
     # Count distinct tickers scanned last night
     cursor.execute("""
         SELECT COUNT(DISTINCT ticker) FROM nightly_reports
-        WHERE date(date_generated) >= date('now', '-1 day')
+        WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
     """)
     tickers_scanned = cursor.fetchone()[0] or 0
 
     # Top picks = English reports from last night, ordered by target upside
     cursor.execute("""
         SELECT COUNT(*) FROM nightly_reports
-        WHERE lang = 'en' AND date(date_generated) >= date('now', '-1 day')
+        WHERE lang = 'en' AND date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
     """)
     top_picks = cursor.fetchone()[0] or 0
 
@@ -122,7 +122,7 @@ def meta():
         SELECT COUNT(DISTINCT nr.ticker)
         FROM nightly_reports nr
         JOIN insider_signals ins ON nr.ticker = ins.ticker
-        WHERE date(nr.date_generated) >= date('now', '-1 day')
+        WHERE date(nr.date_generated) >= date('now', '-3 days')
     """)
     golden_combos = cursor.fetchone()[0] or 0
 
@@ -167,7 +167,7 @@ def picks():
     cursor.execute("""
         SELECT ticker, report_text, lang, current_price, target_price, date_generated
         FROM nightly_reports
-        WHERE date(date_generated) >= date('now', '-1 day')
+        WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
         ORDER BY date_generated DESC
     """)
     rows = cursor.fetchall()
@@ -617,7 +617,7 @@ def send_digest():
     cursor.execute("""
         SELECT ticker, report_text, current_price, target_price
         FROM nightly_reports
-        WHERE lang = 'en' AND date(date_generated) >= date('now', '-1 day')
+        WHERE lang = 'en' AND date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
         ORDER BY date_generated DESC LIMIT 5
     """)
     picks_rows = cursor.fetchall()
