@@ -23,3 +23,8 @@ website/.env
 
 .claude
 .claudeignore
+
+.nightly_winners.json
+
+nasdaq100_tickers.txt
+sp500_tickers.txt

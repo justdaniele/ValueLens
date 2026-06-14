@@ -504,7 +504,7 @@ def earnings():
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT ticker, price_at_signal, prediction, is_evaluated, timestamp
+        SELECT ticker, price_at_signal, prediction, ees_score, is_evaluated, timestamp
         FROM earnings_predictions
         ORDER BY timestamp DESC
         LIMIT 30
@@ -529,6 +529,7 @@ def earnings():
         result.append({
             "ticker":        r["ticker"],
             "prediction":    r["prediction"],
+            "ees_score":     r["ees_score"] or 0,
             "price_signal":  signal_price,
             "price_current": round(curr_price, 2) if curr_price else None,
             "change_pct":    change_pct,

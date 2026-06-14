@@ -16,7 +16,7 @@ logger = logging.getLogger("EarningsEngine")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
 CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
-EES_FIRE_THRESHOLD = int(os.environ.get("EES_FIRE_THRESHOLD", "30"))
+EES_FIRE_THRESHOLD = int(os.environ.get("EES_FIRE_THRESHOLD", "50"))
 
 def send_alert_to_channel(text_en: str, text_it: str = None):
     """Broadcasts localized alerts applying structural safety HTML escape utilities."""
@@ -84,28 +84,69 @@ def _get_earnings_in_window(universe: list, lookahead_hours: int = 48) -> list:
     return upcoming
 
 def _compute_quant_score(stock: yf.Ticker) -> float:
-    """Computes a quantitative momentum score in [-30, +30] based on range, shorts and analysts."""
+    """Computes a pre-earnings quantitative score in [-30, +30].
+
+    Signals used:
+    - Price momentum: stocks near 52w HIGH before earnings tend to beat (institutional
+      accumulation signal). Stocks near 52w LOW tend to miss or disappoint.
+    - Earnings quarterly growth: positive YoY = bullish setup.
+    - Revenue quarterly growth: positive = healthy underlying business.
+    - Analyst consensus: strong buy cluster = institutional conviction.
+    - Short interest: high short % = potential squeeze BUT also bearish expectation.
+    """
     score = 0.0
     try:
-        f = stock.fast_info
+        f    = stock.fast_info
+        info = stock.info
+
         high_52 = getattr(f, 'year_high', None) or getattr(f, 'yearHigh', None)
-        low_52  = getattr(f, 'year_low', None)  or getattr(f, 'yearLow', None)
+        low_52  = getattr(f, 'year_low',  None) or getattr(f, 'yearLow',  None)
         price   = getattr(f, 'last_price', None) or getattr(f, 'lastPrice', None)
 
+        # --- Momentum signal (max ±12 pts) ---
+        # Near 52w high before earnings = institutional conviction, tend to beat.
+        # Near 52w low = selling pressure, negative setup.
         if high_52 and low_52 and price and (high_52 - low_52) > 0:
             range_pct = (price - low_52) / (high_52 - low_52)
-            score += (0.5 - range_pct) * 20.0
+            score += (range_pct - 0.5) * 24.0  # +12 at top, -12 at bottom
 
-        info = stock.info
-        short_pct = info.get("shortPercentOfFloat") or 0.0
-        if short_pct > 0.20:
-            score -= 10.0
-        elif short_pct < 0.05:
-            score += 5.0
+        # --- Earnings growth signal (max ±10 pts) ---
+        eq_growth = info.get("earningsQuarterlyGrowth")
+        if eq_growth is not None:
+            if eq_growth > 0.20:
+                score += 10.0
+            elif eq_growth > 0.05:
+                score += 5.0
+            elif eq_growth < -0.20:
+                score -= 10.0
+            elif eq_growth < 0:
+                score -= 5.0
 
+        # --- Revenue growth signal (max ±5 pts) ---
+        rev_growth = info.get("revenueQuarterlyGrowth") or info.get("revenueGrowth")
+        if rev_growth is not None:
+            if rev_growth > 0.10:
+                score += 5.0
+            elif rev_growth > 0:
+                score += 2.0
+            elif rev_growth < -0.05:
+                score -= 5.0
+
+        # --- Analyst consensus (max ±5 pts) ---
+        # recommendationMean: 1=Strong Buy, 3=Hold, 5=Strong Sell
         rec = info.get("recommendationMean")
         if rec:
-            score += (3.0 - rec) * 5.0
+            score += (3.0 - rec) * 2.5
+
+        # --- Short interest (max ±3 pts) ---
+        # High short before earnings = bearish expectation from smart money
+        short_pct = info.get("shortPercentOfFloat") or 0.0
+        if short_pct > 0.25:
+            score -= 3.0
+        elif short_pct > 0.15:
+            score -= 1.5
+        elif short_pct < 0.03:
+            score += 3.0
 
     except Exception as e:
         logger.debug(f"Quant score calculation error: {e}")
@@ -139,7 +180,7 @@ async def run_earnings_pipeline():
             direction    = "BULLISH" if final_ees >= 0 else "BEARISH"
             direction_it = "RIALZISTA" if final_ees >= 0 else "RIBASSISTA"
 
-            save_earnings_prediction(ticker, curr_price, direction)
+            save_earnings_prediction(ticker, curr_price, direction, ees_score=final_ees)
 
             if abs(final_ees) >= EES_FIRE_THRESHOLD:
                 msg_en = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"

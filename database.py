@@ -52,6 +52,7 @@ def init_db():
             ticker TEXT,
             price_at_signal REAL,
             prediction TEXT,
+            ees_score INTEGER DEFAULT 0,
             is_evaluated INTEGER DEFAULT 0
         )
     """)
@@ -93,14 +94,14 @@ def save_report_to_db(ticker, report_text, lang="en", current_price=None, target
     conn.close()
 
 
-def save_earnings_prediction(ticker, price_at_signal, prediction):
+def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0):
     """Saves a dynamic earnings sniper prediction to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction)
-        VALUES (?, ?, ?)
-    """, (ticker, price_at_signal, prediction))
+        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score)
+        VALUES (?, ?, ?, ?)
+    """, (ticker, price_at_signal, prediction, ees_score))
     conn.commit()
     conn.close()
 
