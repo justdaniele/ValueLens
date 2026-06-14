@@ -37,7 +37,7 @@ EDGAR_HEADERS = {
 # Chart generation
 # ---------------------------------------------------------------------------
 
-def _generate_chart(ticker: str) -> bytes | None:
+def _generate_chart(ticker: str):
     """Generates a 30-day closing price chart as PNG bytes.
 
     Uses a dark theme matching the ValueLens dashboard aesthetic.
@@ -107,7 +107,7 @@ def _generate_chart(ticker: str) -> bytes | None:
 # Insider activity (EDGAR P-code, fast single-ticker path)
 # ---------------------------------------------------------------------------
 
-def _get_cik(ticker: str) -> str | None:
+def _get_cik(ticker: str):
     """Returns zero-padded CIK for a ticker from the local company_tickers.json."""
     try:
         with open(COMPANY_TICKERS_PATH) as f:
