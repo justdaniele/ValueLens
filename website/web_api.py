@@ -468,14 +468,35 @@ def golden_combos():
 
 @app.route("/api/insider_transactions/<ticker>")
 def insider_transactions(ticker):
-    """Returns Form 4 P-code transaction details from the database.
+    """Returns transaction details for a specific ticker on-demand (called when user expands row)."""
+    import pandas as pd, math, datetime as dt
+    cutoff = dt.date.today() - dt.timedelta(days=90)
+    transactions = []
+    try:
+        df = yf.Ticker(ticker.upper()).insider_transactions
+        if df is not None and not df.empty and "Value" in df.columns:
+            for _, row in df.iterrows():
+                try:
+                    tx_date = pd.to_datetime(row["Start Date"]).date()
+                    val     = float(row["Value"])
+                    if math.isnan(val) or val < 500000 or tx_date < cutoff:
+                        continue
+                    shares = float(row.get("Shares", 0)) if "Shares" in row else 0.0
+                    price  = val / shares if shares > 0 else 0.0
+                    transactions.append({
+                        "insider_name": str(row.get("Insider", "")).strip().title(),
+                        "title":        str(row.get("Position", "")).strip(),
+                        "date":         str(tx_date),
+                        "shares":       shares,
+                        "price":        round(price, 2),
+                        "total_value":  val,
+                    })
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return jsonify(transactions[:5])
 
-    Data is populated during the nightly insider scan — only confirmed open-market
-    purchases (SEC transaction code P) are stored, eliminating sales and RSU grants.
-    Each transaction includes a precise SEC EDGAR link via the accession number.
-    """
-    transactions = get_insider_transactions(ticker.upper())
-    return jsonify(transactions)
 
 @app.route("/api/earnings")
 def earnings():
@@ -516,6 +537,63 @@ def earnings():
             "timestamp":     r["timestamp"][:10] if r["timestamp"] else None,
         })
     return jsonify(result)
+
+
+@app.route("/api/live_prices")
+def live_prices():
+    """Returns current prices for all active tickers via direct Yahoo Finance query.
+
+    Uses a single HTTP call to Yahoo Finance for all tickers simultaneously.
+    Called every 10 seconds by the frontend during US market hours only.
+    Returns {ticker: price} dict — null if price unavailable.
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Collect all tickers currently visible on the dashboard
+    cursor.execute("""
+        SELECT DISTINCT ticker FROM nightly_reports
+        WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
+    """)
+    pick_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    cursor.execute("SELECT DISTINCT ticker FROM insider_signals WHERE status = 'ACTIVE'")
+    insider_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    cursor.execute("SELECT DISTINCT ticker FROM virtual_positions WHERE status = 'OPEN'")
+    portfolio_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    conn.close()
+
+    all_tickers = list(set(pick_tickers + insider_tickers + portfolio_tickers))
+    if not all_tickers:
+        return jsonify({})
+
+    # Single Yahoo Finance batch query — much faster than yfinance library
+    symbols = ",".join(all_tickers)
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols}&fields=regularMarketPrice,regularMarketChangePercent"
+
+    try:
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        if resp.status_code != 200:
+            return jsonify({})
+
+        quotes = resp.json().get("quoteResponse", {}).get("result", [])
+        prices = {}
+        for q in quotes:
+            ticker = q.get("symbol")
+            price  = q.get("regularMarketPrice")
+            change = q.get("regularMarketChangePercent")
+            if ticker and price:
+                prices[ticker] = {
+                    "price":  round(price, 2),
+                    "change": round(change, 2) if change is not None else 0.0,
+                }
+        return jsonify(prices)
+
+    except Exception as e:
+        logger.warning(f"Live prices fetch failed: {e}")
+        return jsonify({})
 
 
 @app.route("/api/portfolio")

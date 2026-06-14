@@ -287,6 +287,16 @@ nav {
 .ees-label-bear { font-size: 9px; color: #e05252; font-weight: 700; letter-spacing: 0.05em; }
 .ees-label-bull { font-size: 9px; color: #1d9e75; font-weight: 700; letter-spacing: 0.05em; }
 
+/* ─── Live price updates ─── */
+@keyframes priceFlashGreen { 0%,100% { color: inherit; } 50% { color: #1D9E75; } }
+@keyframes priceFlashRed   { 0%,100% { color: inherit; } 50% { color: #DC2626; } }
+.price-flash-up   { animation: priceFlashGreen 0.6s ease; }
+.price-flash-down { animation: priceFlashRed   0.6s ease; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #1D9E75;
+            display: inline-block; margin-right: 5px;
+            animation: livePulse 2s infinite; }
+@keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
 /* ─── Pick indicator sections ─── */
 .pick-indicators { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; }
 
@@ -860,6 +870,8 @@ async function fetchJSON(endpoint) {
 async function loadAll() {
   updateMarketStatusBadge();
   await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos()]);
+  // Start live price updates every 10 seconds during market hours
+  startLivePriceUpdates();
 }
 
 function countUp(el, target, suffix, duration) {
@@ -974,7 +986,7 @@ function renderPicks(data) {
       <div class="pick-metrics">
         <div>
           <div class="pick-metric-label">Price</div>
-          <div class="pick-metric-val mono">${p.price ? '$' + Number(p.price).toFixed(2) : '—'}</div>
+          <div class="pick-metric-val mono" data-live-ticker="${p.ticker}">${p.price ? '$' + Number(p.price).toFixed(2) : '—'}</div>
         </div>
         <div>
           <div class="pick-metric-label">AI Target</div>
@@ -1254,40 +1266,14 @@ async function fetchInsiderLivePrices() {
   }
 }
 
-async function toggleInsiderRow(idx, ticker) {
+function toggleInsiderRow(idx) {
   const detail = document.getElementById(`insider-detail-${idx}`);
   const chev   = document.getElementById(`insider-chev-${idx}`);
   if (!detail) return;
   const isOpen = detail.classList.contains('open');
   detail.classList.toggle('open', !isOpen);
   if (chev) chev.classList.toggle('open', !isOpen);
-  if (!isOpen && detail.dataset.loaded !== '1') {
-    detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading...</span>';
-    try {
-      const txs = await fetchJSON('/api/insider_transactions/' + ticker);
-      const fallbackUrl = 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + ticker + '&type=4&owner=include&count=10';
-      const lines = txs.length ? txs.map(tx => {
-        const name   = tx.insider_name || 'Insider';
-        const role   = tx.title ? ' <span class="insider-tx-role">— ' + tx.title + '</span>' : '';
-        const shares = tx.shares > 0 ? Number(tx.shares).toLocaleString() + ' shares' : '';
-        const price  = tx.price > 0 ? ' @ $' + tx.price.toFixed(2) : '';
-        const val    = tx.total_value > 0 ? ' = $' + Number(tx.total_value).toLocaleString(undefined,{maximumFractionDigits:0}) : '';
-        const secUrl = tx.sec_url || fallbackUrl;
-        return '<div class="insider-tx">' +
-          '<span class="insider-tx-name">' + name + role + '</span>' +
-          '<span class="insider-tx-detail">' + shares + price + val + '</span>' +
-          '<span class="insider-tx-date">' + (tx.date || '') + '</span>' +
-          '<a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a>' +
-          '</div>';
-      }).join('') : '<span style="color:var(--text-muted);font-size:12px">No P-code purchases ≥ $500k in last 90 days.</span>';
-      detail.querySelector('.insider-detail-inner').innerHTML = lines;
-      detail.dataset.loaded = '1';
-    } catch(e) {
-      detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--red);font-size:12px">Failed to load.</span>';
-    }
-  }
 }
-
 
 let insiderLivePrices = {};
 function renderInsiderTable() {
@@ -1318,7 +1304,7 @@ function renderInsiderTable() {
       </td>
       <td><span class="it-badge it-buy">BUY</span></td>
       <td><span class="it-val">${valueStr}</span></td>
-      <td><span class="it-price">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
+      <td><span class="it-price" data-live-ticker="${r.ticker}">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
       <td>${changeCell}</td>
       <td><span class="it-date">${r.date_detected || '—'}</span></td>
     </tr>`;
@@ -1450,6 +1436,60 @@ async function submitEmail() {
 
 // ─── Boot ───
 loadAll();
+
+// ─── Live price updates (10s interval, market hours only) ───
+
+let livePrices = {};  // Cache of latest prices
+
+async function fetchLivePrices() {
+  try {
+    const data = await fetchJSON('/api/live_prices');
+    Object.entries(data).forEach(([ticker, info]) => {
+      const prev = livePrices[ticker];
+      livePrices[ticker] = info;
+      // Flash price elements that changed
+      if (prev && prev.price !== info.price) {
+        const direction = info.price > prev.price ? 'up' : 'down';
+        document.querySelectorAll(`[data-live-ticker="${ticker}"]`).forEach(el => {
+          el.textContent = '$' + info.price.toFixed(2);
+          el.classList.remove('price-flash-up', 'price-flash-down');
+          void el.offsetWidth; // Force reflow
+          el.classList.add(direction === 'up' ? 'price-flash-up' : 'price-flash-down');
+        });
+        // Update change % elements
+        document.querySelectorAll(`[data-live-change="${ticker}"]`).forEach(el => {
+          const sign = info.change >= 0 ? '+' : '';
+          el.textContent = sign + info.change.toFixed(2) + '%';
+          el.style.color = info.change >= 0 ? 'var(--green)' : 'var(--red)';
+        });
+      }
+    });
+  } catch(e) {
+    // Silent fail — prices will update next cycle
+  }
+}
+
+function startLivePriceUpdates() {
+  if (!isMarketOpen()) return;
+
+  // Add live dot to market status
+  const msLabel = document.getElementById('ms-label');
+  if (msLabel && !msLabel.querySelector('.live-dot')) {
+    const dot = document.createElement('span');
+    dot.className = 'live-dot';
+    msLabel.prepend(dot);
+  }
+
+  fetchLivePrices(); // Immediate first fetch
+  const interval = setInterval(() => {
+    if (!isMarketOpen()) {
+      clearInterval(interval);
+      return;
+    }
+    fetchLivePrices();
+  }, 10_000); // Every 10 seconds
+}
+
 </script>
 </body>
 </html>

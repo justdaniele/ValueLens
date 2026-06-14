@@ -172,19 +172,21 @@ async def core_scheduler_loop():
         await asyncio.to_thread(evaluate_historical_accuracy_loop)
 
     async def _insider_block():
-        """Executes insider tracking and broadcasts daily cycle completion notice."""
+        """Executes overnight insider tracking (01:00 AM cycle)."""
         await asyncio.to_thread(run_insider_tracking)
-        send_alert_to_channel(
-            "📡 <b>System Notice:</b> Daily cycle execution step rotated successfully.",
-            "📡 <b>Notifica di Sistema:</b> Rotazione del ciclo giornaliero completata con successo."
-        )
 
     # Ordered weekday steps: (hour, minute, log_label, async_factory)
+    # Earnings sniper runs 3x/day (silent at 10:00 and 16:30 — DB only, no Telegram)
+    # Insider tracking runs 2x/day (14:00 midday + 01:00 overnight)
+    # Only insider buy alerts go to Telegram — earnings updates go to dashboard only
     WEEKDAY_STEPS = [
-        (8,  0,  "08:00 AM — Morning Broadcast",        lambda: asyncio.to_thread(morning_broadcast)),
-        (12, 30, "12:30 PM — Earnings Catalyst Sniper", lambda: run_earnings_pipeline()),
-        (22, 30, "22:30 PM — Nightly Deep Fundamental", lambda: _nightly_block()),
-        (1,  0,  "01:00 AM — Insider Tracking",         lambda: _insider_block()),
+        (8,  0,  "08:00 AM — Morning Broadcast",               lambda: asyncio.to_thread(morning_broadcast)),
+        (10, 0,  "10:00 AM — Earnings Sniper (silent)",        lambda: run_earnings_pipeline(silent=True)),
+        (12, 30, "12:30 PM — Earnings Sniper",                 lambda: run_earnings_pipeline()),
+        (14, 0,  "14:00 PM — Insider Tracking (midday)",       lambda: asyncio.to_thread(run_insider_tracking)),
+        (16, 30, "16:30 PM — Earnings Sniper (post-market)",   lambda: run_earnings_pipeline(silent=True)),
+        (22, 30, "22:30 PM — Nightly Deep Fundamental",        lambda: _nightly_block()),
+        (1,  0,  "01:00 AM — Insider Tracking",                lambda: _insider_block()),
     ]
 
     while True:
