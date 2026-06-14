@@ -132,42 +132,51 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
 
     today   = datetime.date.today()
     cutoff  = today - datetime.timedelta(days=days_back)
-    year    = today.year
-    quarter = (today.month - 1) // 3 + 1
 
-    # Fetch current quarter index
-    idx_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
-    try:
-        resp = requests.get(idx_url, headers=EDGAR_HEADERS, timeout=20)
-        if resp.status_code != 200:
-            return []
+    # Build list of quarters to cover the lookback window
+    quarters_to_check = set()
+    d = cutoff
+    while d <= today:
+        quarters_to_check.add((d.year, (d.month - 1) // 3 + 1))
+        d = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
 
-        accessions = []
-        data_start = 0
-        for i, line in enumerate(resp.text.splitlines()):
-            if line.startswith("-----"):
-                data_start = i + 1
-                break
+    import re as _re
+    accessions = []
 
-        import re as _re
-        for line in resp.text.splitlines()[data_start:]:
-            parts = _re.split(r'  +', line.strip())
-            if len(parts) < 5 or parts[0].strip() != "4":
+    for year, quarter in sorted(quarters_to_check):
+        idx_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
+        try:
+            resp = requests.get(idx_url, headers=EDGAR_HEADERS, timeout=20)
+            if resp.status_code != 200:
                 continue
-            try:
-                filing_cik  = parts[2].strip().zfill(10)
-                date_filed  = parts[3].strip()
-                filename    = parts[4].strip()
-                if filing_cik != cik:
-                    continue
-                if datetime.date.fromisoformat(date_filed) < cutoff:
-                    continue
-                acc = filename.split("/")[-1].replace(".txt", "").replace("-", "")
-                accessions.append(acc)
-            except Exception:
-                pass
 
-    except Exception:
+            data_start = 0
+            for i, line in enumerate(resp.text.splitlines()):
+                if line.startswith("-----"):
+                    data_start = i + 1
+                    break
+
+            for line in resp.text.splitlines()[data_start:]:
+                parts = _re.split(r'  +', line.strip())
+                if len(parts) < 5 or parts[0].strip() != "4":
+                    continue
+                try:
+                    filing_cik  = parts[2].strip().zfill(10)
+                    date_filed  = parts[3].strip()
+                    filename    = parts[4].strip()
+                    if filing_cik != cik:
+                        continue
+                    if datetime.date.fromisoformat(date_filed) < cutoff:
+                        continue
+                    acc = filename.split("/")[-1].replace(".txt", "").replace("-", "")
+                    accessions.append(acc)
+                except Exception:
+                    pass
+            time.sleep(0.3)
+        except Exception:
+            continue
+
+    if not accessions:
         return []
 
     purchases = []
