@@ -1053,6 +1053,12 @@ function renderPicks(data) {
         <div class="pick-chart-inner">
           <canvas id="chart-${i}" role="img" aria-label="30-day price chart for ${p.ticker}"></canvas>
         </div>
+        <div style="padding:0 0 4px">
+          <canvas id="rsi-chart-${i}" height="40"></canvas>
+        </div>
+        <div id="rsi-label-${i}" style="display:flex;gap:12px;padding:2px 0 4px;font-size:10px;color:var(--text-muted);font-family:var(--mono)">
+          <span style="color:#3B82F6">— MA20</span><span style="color:#D97706">— RSI</span>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1141,16 +1147,24 @@ function toggleChart(i, ticker) {
       const ctx = document.getElementById(`chart-${i}`);
       if (!ctx) return;
       if (chartInstances[i]) chartInstances[i].destroy();
+
+      const lastP   = d.prices[d.prices.length - 1];
+      const firstP  = d.prices[0];
+      const lineCol = lastP >= firstP ? '#1D9E75' : '#DC2626';
+      const fillCol = lastP >= firstP ? 'rgba(29,158,117,0.07)' : 'rgba(220,38,38,0.07)';
+
+      // Price + MA20 chart
       chartInstances[i] = new Chart(ctx, {
         type: 'line',
         data: {
           labels: d.labels,
-          datasets: [{
-            data: d.prices,
-            borderColor: '#1D9E75',
-            backgroundColor: 'rgba(29,158,117,0.07)',
-            fill: true, tension: 0.4, pointRadius: 0, borderWidth: 1.5
-          }]
+          datasets: [
+            { data: d.prices, borderColor: lineCol, backgroundColor: fillCol,
+              fill: true, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
+            { data: d.ma20,  borderColor: '#3B82F6', borderWidth: 1,
+              borderDash: [4,3], pointRadius: 0, fill: false, tension: 0.4,
+              spanGaps: true }
+          ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
@@ -1161,6 +1175,38 @@ function toggleChart(i, ticker) {
           }
         }
       });
+
+      // RSI sub-chart
+      const rsiCtx = document.getElementById(`rsi-chart-${i}`);
+      if (rsiCtx && d.rsi) {
+        const rsiNow = d.current_rsi;
+        const rsiCol = rsiNow >= 70 ? '#DC2626' : rsiNow <= 30 ? '#1D9E75' : '#D97706';
+        new Chart(rsiCtx, {
+          type: 'line',
+          data: {
+            labels: d.labels,
+            datasets: [{ data: d.rsi, borderColor: rsiCol, borderWidth: 1.2,
+              pointRadius: 0, fill: false, tension: 0.4, spanGaps: true }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { display: false }, grid: { display: false }, border: { display: false } },
+              y: { min: 0, max: 100,
+                ticks: { color: '#475569', font: { size: 8 }, stepSize: 70,
+                  callback: v => [30,70].includes(v) ? v : '' },
+                grid: { color: ctx2 => [30,70].includes(ctx2.tick?.value) ? 'rgba(255,255,255,0.1)' : 'transparent' },
+                border: { display: false } }
+            }
+          }
+        });
+        const lbl = document.getElementById(`rsi-label-${i}`);
+        if (lbl && rsiNow != null) {
+          const status = rsiNow >= 70 ? ' ⚠️ Overbought' : rsiNow <= 30 ? ' 🟢 Oversold' : '';
+          lbl.innerHTML = `<span style="color:#3B82F6">— MA20</span><span style="color:${rsiCol}">— RSI ${rsiNow}${status}</span>`;
+        }
+      }
     })
     .catch(() => {
       wrap.innerHTML = '<p style="font-size:11px;color:var(--text-muted);padding:12px 0;font-family:var(--mono)">Price data unavailable.</p>';

@@ -109,6 +109,11 @@ def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) 
         return []
 
 
+# In-process universe cache — avoids re-reading files on repeated calls within same process
+_universe_cache: list = []
+_universe_cache_date: str = ""
+
+
 def get_us_market_universe() -> list:
     """
     Returns a single deduplicated list of tickers from all configured universes.
@@ -116,6 +121,12 @@ def get_us_market_universe() -> list:
     The screening pipeline is completely index-agnostic — it just sees one list.
     Controlled by SCAN_UNIVERSE env var (default: sp500,nasdaq100).
     """
+    global _universe_cache, _universe_cache_date
+    import datetime as _dt
+    _today = str(_dt.date.today())
+    if _universe_cache and _universe_cache_date == _today:
+        return _universe_cache
+
     seen   = set()
     merged = []
 
@@ -135,6 +146,8 @@ def get_us_market_universe() -> list:
         logger.info(f"NASDAQ-100 contributed {nasdaq_only} exclusive tickers.")
 
     logger.info(f"Combined universe: {len(merged)} unique tickers (config: '{SCAN_UNIVERSE}')")
+    _universe_cache = merged
+    _universe_cache_date = _today
     return merged
 
 

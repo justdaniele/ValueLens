@@ -325,15 +325,45 @@ def _extract_signals(report_text: str) -> list:
 
 @app.route("/api/price_history/<ticker>")
 def price_history(ticker: str):
-    """Fetches 30 days of daily closing prices from yfinance for a given ticker."""
+    """Returns 30-day price history with RSI(14) and MA20 for chart overlays."""
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="30d")
+        # Fetch 60d to have enough data for RSI(14) warmup period
+        hist = stock.history(period="60d")
         if hist.empty:
             return jsonify({"error": "No data"}), 404
-        labels = [str(d.date()) for d in hist.index]
-        prices = [round(float(p), 2) for p in hist["Close"]]
-        return jsonify({"labels": labels, "prices": prices})
+
+        closes = hist["Close"]
+
+        # RSI(14) — computed manually, no external dependency
+        delta = closes.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rs    = gain / loss.replace(0, float("inf"))
+        rsi   = (100 - (100 / (1 + rs))).round(1)
+
+        # MA20
+        ma20 = closes.rolling(20).mean().round(2)
+
+        # Return only last 30 trading days
+        hist30 = hist.tail(30)
+        idx30  = hist30.index
+
+        labels  = [str(d.date()) for d in idx30]
+        prices  = [round(float(p), 2) for p in hist30["Close"]]
+        rsi_vals = [None if str(v) == "nan" else float(v) for v in rsi.reindex(idx30)]
+        ma20_vals = [None if str(v) == "nan" else float(v) for v in ma20.reindex(idx30)]
+
+        # Current RSI for label
+        current_rsi = next((v for v in reversed(rsi_vals) if v is not None), None)
+
+        return jsonify({
+            "labels":  labels,
+            "prices":  prices,
+            "rsi":     rsi_vals,
+            "ma20":    ma20_vals,
+            "current_rsi": round(current_rsi, 1) if current_rsi else None,
+        })
     except Exception as e:
         logger.error(f"Price history failed for {ticker}: {e}")
         return jsonify({"error": str(e)}), 500

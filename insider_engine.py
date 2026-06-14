@@ -27,6 +27,10 @@ EDGAR_HEADERS = {
     "Accept-Encoding": "gzip, deflate",
 }
 
+# Cache EDGAR quarterly index on disk — SEC updates it once daily at ~3am ET
+_INDEX_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".edgar_index_cache.json")
+_INDEX_CACHE_TTL_HOURS = 23
+
 
 def _load_ticker_cik_map() -> dict:
     """Loads SEC EDGAR company_tickers.json and returns {TICKER: CIK_padded}."""
@@ -43,38 +47,90 @@ def _load_ticker_cik_map() -> dict:
         return {}
 
 
+def _parse_index_lines(text: str) -> list:
+    """Parses Form 4 lines from EDGAR quarterly index text."""
+    results = []
+    data_start = 0
+    for i, line in enumerate(text.splitlines()):
+        if line.startswith("-----"):
+            data_start = i + 1
+            break
+    for line in text.splitlines()[data_start:]:
+        if not line.strip():
+            continue
+        parts = re.split(r'  +', line.strip())
+        if len(parts) < 5 or parts[0].strip() != "4":
+            continue
+        try:
+            cik        = parts[2].strip().zfill(10)
+            date_filed = parts[3].strip()
+            filename   = parts[4].strip()
+            accession  = filename.split("/")[-1].replace(".txt", "").replace("-", "")
+            results.append((cik, accession, date_filed))
+        except Exception:
+            pass
+    return results
+
+
 def _fetch_form4_index(year: int, quarter: int) -> list:
-    """Downloads EDGAR quarterly Form 4 index. Returns [(cik_padded, accession, date)]."""
+    """Downloads EDGAR quarterly Form 4 index with disk cache and retry logic.
+
+    Cache: saves to .edgar_index_cache.json, valid for 23 hours (SEC updates daily).
+    Retry: 3 attempts with exponential backoff before falling back to stale cache.
+    Returns [(cik_padded, accession, date)].
+    """
+    import json as _json
+
+    cache_key = f"{year}_QTR{quarter}"
     url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
+
+    # Check disk cache
     try:
-        resp = requests.get(url, headers=EDGAR_HEADERS, timeout=30)
-        if resp.status_code != 200:
-            return []
-        results = []
-        data_start = 0
-        for i, line in enumerate(resp.text.splitlines()):
-            if line.startswith("-----"):
-                data_start = i + 1
-                break
-        for line in resp.text.splitlines()[data_start:]:
-            if not line.strip():
-                continue
-            parts = re.split(r'  +', line.strip())
-            if len(parts) < 5 or parts[0].strip() != "4":
-                continue
-            try:
-                cik        = parts[2].strip().zfill(10)
-                date_filed = parts[3].strip()
-                filename   = parts[4].strip()
-                accession  = filename.split("/")[-1].replace(".txt", "").replace("-", "")
-                results.append((cik, accession, date_filed))
-            except Exception:
-                pass
-        logger.info(f"EDGAR index {year}/QTR{quarter}: {len(results)} Form 4 filings.")
-        return results
-    except Exception as e:
-        logger.warning(f"EDGAR index fetch failed: {e}")
-        return []
+        with open(_INDEX_CACHE_PATH) as f:
+            cache = _json.load(f)
+        entry = cache.get(cache_key, {})
+        cached_at = datetime.datetime.fromisoformat(entry.get("cached_at", "2000-01-01"))
+        age_hours = (datetime.datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours < _INDEX_CACHE_TTL_HOURS and entry.get("data"):
+            logger.info(f"EDGAR index {cache_key}: loaded from cache ({age_hours:.1f}h old, {len(entry['data'])} entries).")
+            return [tuple(x) for x in entry["data"]]
+    except Exception:
+        cache = {}
+
+    # Fetch from EDGAR with retry + exponential backoff
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=EDGAR_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                results = _parse_index_lines(resp.text)
+                # Save to disk cache
+                try:
+                    cache[cache_key] = {
+                        "cached_at": datetime.datetime.now().isoformat(),
+                        "data": [list(r) for r in results]
+                    }
+                    with open(_INDEX_CACHE_PATH, "w") as f:
+                        _json.dump(cache, f)
+                except Exception as ce:
+                    logger.debug(f"Cache write failed: {ce}")
+                logger.info(f"EDGAR index {cache_key}: {len(results)} Form 4 filings fetched.")
+                return results
+            last_err = f"HTTP {resp.status_code}"
+        except Exception as e:
+            last_err = str(e)
+        wait = 2 ** attempt
+        logger.warning(f"EDGAR index fetch attempt {attempt+1}/3 failed ({last_err}). Retrying in {wait}s...")
+        time.sleep(wait)
+
+    # Fallback: use stale cache if available
+    stale = cache.get(cache_key, {}).get("data")
+    if stale:
+        logger.warning(f"EDGAR {cache_key} unreachable — using stale cache ({len(stale)} entries).")
+        return [tuple(x) for x in stale]
+
+    logger.error(f"EDGAR {cache_key} unavailable and no cache. Insider scan may miss filings.")
+    return []
 
 
 def _parse_form4_p_code(cik: str, accession: str) -> list:

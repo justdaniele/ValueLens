@@ -2,6 +2,7 @@ import os
 import logging
 from openai import OpenAI
 from dotenv import load_dotenv
+import yfinance as yf
 
 load_dotenv()
 
@@ -28,9 +29,25 @@ STRICT FORMATTING RULES:
 - End with a divider line then the score block.
 - Opportunity Score: integer 0-100. Be ruthlessly honest.
 - SCORES line (machine-readable, always include): SCORES: DCF=X | ZOMBIE=X | SHORT=X where each X is -10 (max bearish) to +10 (max bullish).
+- Reference the RSI value in the Short Interest section (momentum context).
 - Verdict: exactly 1 sentence.
 - No filler words. No repetition. Every sentence must add new information.
 """
+
+def _compute_rsi(ticker: str, period: int = 14) -> float:
+    """Computes RSI(14) for a ticker using last 60 days of price data."""
+    try:
+        hist   = yf.Ticker(ticker).history(period="60d")["Close"]
+        delta  = hist.diff()
+        gain   = delta.clip(lower=0).rolling(period).mean()
+        loss   = (-delta.clip(upper=0)).rolling(period).mean()
+        rs     = gain / loss.replace(0, float("inf"))
+        rsi    = 100 - (100 / (1 + rs))
+        val    = rsi.dropna().iloc[-1]
+        return round(float(val), 1)
+    except Exception:
+        return None
+
 
 def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_info: dict = None) -> str:
     if not ai_client:
@@ -47,7 +64,8 @@ def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_in
         user_content = (
             f"Genera un brief per <b>{ticker}</b> ({info.get('shortName', ticker)}) usando questi dati reali:\n"
             f"- P/E: {info.get('trailingPE', 'N/A')} | P/B: {info.get('priceToBook', 'N/A')}\n"
-            f"- Target Analisti: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n\n"
+            f"- Target Analisti: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n"
+            f"- RSI(14): {rsi_str}\n\n"
             f"Struttura ESATTAMENTE cosi' (nessuna deviazione):\n\n"
             f"📉 <b>Reverse DCF</b>\n"
             f"[1-2 righe MAX: tasso di crescita implicito nel prezzo attuale, e' realistico?]\n\n"
@@ -62,10 +80,14 @@ def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_in
             f"(Linea SCORES: ogni X e' un intero da -10 ribassista a +10 rialzista per quella sezione)"
         )
     else:
+        rsi_val = _compute_rsi(ticker)
+        rsi_str = f"{rsi_val} ({'⚠️ overbought' if rsi_val and rsi_val >= 70 else '🟢 oversold' if rsi_val and rsi_val <= 30 else 'neutral'})" if rsi_val else "N/A"
+
         user_content = (
             f"Generate a brief for <b>{ticker}</b> ({info.get('shortName', ticker)}) using this real data:\n"
             f"- P/E: {info.get('trailingPE', 'N/A')} | P/B: {info.get('priceToBook', 'N/A')}\n"
-            f"- Analyst Target: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n\n"
+            f"- Analyst Target: {info.get('targetMeanPrice', 'N/A')} | Short Float: {short_interest_str}\n"
+            f"- RSI(14): {rsi_str}\n\n"
             f"Structure EXACTLY as follows (no deviations):\n\n"
             f"📉 <b>Reverse DCF</b>\n"
             f"[1-2 lines MAX: implied growth rate in current price, is it realistic?]\n\n"

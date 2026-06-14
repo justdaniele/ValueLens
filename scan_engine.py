@@ -59,35 +59,67 @@ def _generate_chart(ticker: str):
         prices = hist["Close"]
         dates  = prices.index
 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        fig.patch.set_facecolor("#0A0F1E")
-        ax.set_facecolor("#0F1729")
+        # Compute RSI(14) manually — no pandas-ta dependency needed
+        def _rsi(series, period=14):
+            delta = series.diff()
+            gain  = delta.clip(lower=0).rolling(period).mean()
+            loss  = (-delta.clip(upper=0)).rolling(period).mean()
+            rs    = gain / loss.replace(0, float("inf"))
+            return 100 - (100 / (1 + rs))
 
-        # Price line and fill
-        color   = "#1D9E75" if prices.iloc[-1] >= prices.iloc[0] else "#DC2626"
+        rsi_values = _rsi(prices)
+        ma20       = prices.rolling(20).mean()
+
+        # Two-panel layout: price (top) + RSI (bottom)
+        fig, (ax, ax_rsi) = plt.subplots(
+            2, 1, figsize=(10, 5.5),
+            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.08}
+        )
+        fig.patch.set_facecolor("#0A0F1E")
+        for a in (ax, ax_rsi):
+            a.set_facecolor("#0F1729")
+            for spine in a.spines.values():
+                spine.set_color("#162034")
+            a.tick_params(colors="#64748B", labelsize=8)
+            a.grid(True, color="#162034", linewidth=0.7, linestyle="--", zorder=1)
+
+        # Price line + fill
+        color = "#1D9E75" if prices.iloc[-1] >= prices.iloc[0] else "#DC2626"
         ax.plot(dates, prices, color=color, linewidth=2, zorder=3)
         ax.fill_between(dates, prices, prices.min() * 0.995,
                         color=color, alpha=0.12, zorder=2)
 
-        # Style
-        ax.tick_params(colors="#64748B", labelsize=9)
+        # 20-day MA overlay
+        ax.plot(dates, ma20, color="#3B82F6", linewidth=1.2,
+                linestyle="--", alpha=0.75, label="MA20", zorder=3)
+        ax.legend(loc="upper left", fontsize=8,
+                  facecolor="#0F1729", edgecolor="#162034", labelcolor="#64748B")
+
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
         ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
-        plt.setp(ax.get_xticklabels(), rotation=0)
+        ax.set_xticklabels([])  # hide x labels on top panel
 
-        for spine in ax.spines.values():
-            spine.set_color("#162034")
+        # RSI panel
+        ax_rsi.plot(dates, rsi_values, color="#D97706", linewidth=1.4, zorder=3)
+        ax_rsi.axhline(70, color="#DC2626", linewidth=0.8, linestyle="--", alpha=0.6)
+        ax_rsi.axhline(30, color="#1D9E75", linewidth=0.8, linestyle="--", alpha=0.6)
+        ax_rsi.fill_between(dates, rsi_values, 70,
+                            where=(rsi_values >= 70), color="#DC2626", alpha=0.15)
+        ax_rsi.fill_between(dates, rsi_values, 30,
+                            where=(rsi_values <= 30), color="#1D9E75", alpha=0.15)
+        ax_rsi.set_ylim(0, 100)
+        ax_rsi.set_ylabel("RSI", color="#64748B", fontsize=8)
+        ax_rsi.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+        ax_rsi.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+        plt.setp(ax_rsi.get_xticklabels(), rotation=0)
 
-        ax.yaxis.set_tick_params(labelcolor="#64748B")
-        ax.yaxis.label.set_color("#64748B")
-        ax.grid(True, color="#162034", linewidth=0.8, linestyle="--", zorder=1)
-
-        # Title
+        # Title on top panel
         pct_chg = ((prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0]) * 100
+        rsi_now = rsi_values.dropna().iloc[-1] if not rsi_values.dropna().empty else 0
         sign    = "+" if pct_chg >= 0 else ""
         ax.set_title(
-            f"{ticker}   ${prices.iloc[-1]:.2f}   {sign}{pct_chg:.2f}%  (30d)",
-            color="#E2E8F0", fontsize=13, fontweight="bold", pad=12
+            f"{ticker}   ${prices.iloc[-1]:.2f}   {sign}{pct_chg:.2f}%  (30d)   RSI {rsi_now:.0f}",
+            color="#E2E8F0", fontsize=12, fontweight="bold", pad=10
         )
 
         plt.tight_layout()
@@ -144,38 +176,59 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
     import re as _re
     accessions = []
 
+    _CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".edgar_index_cache.json")
+
     for year, quarter in sorted(quarters):
-        idx_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
+        cache_key = f"{year}_QTR{quarter}"
+        index_lines = []
+
+        # Try disk cache first (shared with insider_engine)
         try:
-            resp = requests.get(idx_url, headers=EDGAR_HEADERS, timeout=20)
-            if resp.status_code != 200:
-                continue
-
-            data_start = 0
-            for i, line in enumerate(resp.text.splitlines()):
-                if line.startswith("-----"):
-                    data_start = i + 1
-                    break
-
-            for line in resp.text.splitlines()[data_start:]:
-                parts = _re.split(r"  +", line.strip())
-                if len(parts) < 5 or parts[0].strip() != "4":
-                    continue
-                try:
-                    filing_cik  = parts[2].strip()
-                    date_filed  = parts[3].strip()
-                    filename    = parts[4].strip()
-                    if filing_cik != cik:
-                        continue
-                    if datetime.date.fromisoformat(date_filed) < cutoff:
-                        continue
-                    acc = filename.split("/")[-1].replace(".txt", "").replace("-", "")
-                    accessions.append((acc, filing_cik))
-                except Exception:
-                    pass
-            time.sleep(0.3)
+            with open(_CACHE_PATH) as _f:
+                _cache = _json.load(_f)
+            entry = _cache.get(cache_key, {})
+            cached_at = datetime.datetime.fromisoformat(entry.get("cached_at", "2000-01-01"))
+            if (datetime.datetime.now() - cached_at).total_seconds() / 3600 < 23:
+                index_lines = [tuple(x) for x in entry.get("data", [])]
         except Exception:
-            continue
+            pass
+
+        # Fetch from EDGAR if cache miss
+        if not index_lines:
+            idx_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
+            try:
+                resp = requests.get(idx_url, headers=EDGAR_HEADERS, timeout=20)
+                if resp.status_code == 200:
+                    data_start = 0
+                    for i, line in enumerate(resp.text.splitlines()):
+                        if line.startswith("-----"):
+                            data_start = i + 1
+                            break
+                    for line in resp.text.splitlines()[data_start:]:
+                        parts = _re.split(r"  +", line.strip())
+                        if len(parts) >= 5 and parts[0].strip() == "4":
+                            try:
+                                index_lines.append((
+                                    parts[2].strip().zfill(10),
+                                    parts[4].strip().split("/")[-1].replace(".txt","").replace("-",""),
+                                    parts[3].strip()
+                                ))
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+        # Filter to our CIK
+        for filing_cik, acc, date_filed in index_lines:
+            if filing_cik.lstrip("0") != cik.lstrip("0"):
+                continue
+            try:
+                if datetime.date.fromisoformat(date_filed) < cutoff:
+                    continue
+                accessions.append((acc, filing_cik))
+            except Exception:
+                pass
 
     if not accessions:
         return []
