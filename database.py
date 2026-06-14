@@ -272,7 +272,7 @@ def record_alert_sent(ticker: str, alert_type: str = "fundamental"):
 # ---------------------------------------------------------------------------
 
 PORTFOLIO_STARTING_CASH = 100_000.0
-POSITION_SIZE_PCT       = 0.05   # 5% per position = max 20 concurrent positions
+POSITION_SIZE_PCT       = 0.01   # 1% per position = max 100 concurrent positions
 STOP_LOSS_PCT           = 0.20   # -20% stop loss
 HOLD_DAYS               = 90     # Close after 90 days if target not reached
 
