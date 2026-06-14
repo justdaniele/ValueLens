@@ -539,6 +539,111 @@ def earnings():
     return jsonify(result)
 
 
+@app.route("/api/portfolio")
+def portfolio():
+    """Returns virtual portfolio summary and all positions."""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    STARTING_CASH = 100_000.0
+
+    # Open positions with live P&L
+    cursor.execute("""
+        SELECT id, ticker, entry_price, target_price, shares,
+               position_value, opened_at, status
+        FROM virtual_positions WHERE status = 'OPEN'
+        ORDER BY opened_at DESC
+    """)
+    open_rows = cursor.fetchall()
+
+    # Closed positions
+    cursor.execute("""
+        SELECT id, ticker, entry_price, target_price, shares,
+               position_value, opened_at, closed_at,
+               close_price, close_reason, pnl_pct
+        FROM virtual_positions WHERE status = 'CLOSED'
+        ORDER BY closed_at DESC LIMIT 50
+    """)
+    closed_rows = cursor.fetchall()
+    conn.close()
+
+    open_positions = []
+    total_invested = 0.0
+    total_unrealized_pnl = 0.0
+
+    for r in open_rows:
+        curr_price = None
+        try:
+            curr_price = yf.Ticker(r["ticker"]).fast_info.last_price
+        except Exception:
+            pass
+
+        entry   = r["entry_price"]
+        shares  = r["shares"]
+        pos_val = r["position_value"]
+        curr_val = (curr_price * shares) if curr_price else pos_val
+        pnl_pct  = ((curr_price - entry) / entry * 100) if curr_price else 0.0
+        pnl_abs  = curr_val - pos_val
+
+        total_invested       += pos_val
+        total_unrealized_pnl += pnl_abs
+
+        open_positions.append({
+            "id":            r["id"],
+            "ticker":        r["ticker"],
+            "entry_price":   entry,
+            "target_price":  r["target_price"],
+            "shares":        round(shares, 4),
+            "cost_basis":    pos_val,
+            "current_price": round(curr_price, 2) if curr_price else None,
+            "current_value": round(curr_val, 2),
+            "pnl_pct":       round(pnl_pct, 2),
+            "pnl_abs":       round(pnl_abs, 2),
+            "opened_at":     r["opened_at"][:10] if r["opened_at"] else None,
+        })
+
+    closed_positions = []
+    total_realized_pnl = 0.0
+
+    for r in closed_rows:
+        pnl_abs = ((r["pnl_pct"] or 0) / 100) * r["position_value"]
+        total_realized_pnl += pnl_abs
+        closed_positions.append({
+            "ticker":       r["ticker"],
+            "entry_price":  r["entry_price"],
+            "close_price":  r["close_price"],
+            "pnl_pct":      round(r["pnl_pct"] or 0, 2),
+            "pnl_abs":      round(pnl_abs, 2),
+            "close_reason": r["close_reason"],
+            "opened_at":    r["opened_at"][:10] if r["opened_at"] else None,
+            "closed_at":    r["closed_at"][:10] if r["closed_at"] else None,
+        })
+
+    cash_available   = max(0.0, STARTING_CASH - total_invested)
+    portfolio_value  = cash_available + total_invested + total_unrealized_pnl
+    total_return_pct = ((portfolio_value - STARTING_CASH) / STARTING_CASH) * 100
+
+    # Allocation breakdown for pie chart
+    allocation = [{"ticker": p["ticker"], "value": round(p["current_value"], 2)} for p in open_positions]
+    allocation.append({"ticker": "CASH", "value": round(cash_available, 2)})
+
+    return jsonify({
+        "summary": {
+            "starting_cash":       STARTING_CASH,
+            "cash_available":      round(cash_available, 2),
+            "total_invested":      round(total_invested, 2),
+            "portfolio_value":     round(portfolio_value, 2),
+            "total_return_pct":    round(total_return_pct, 2),
+            "unrealized_pnl":      round(total_unrealized_pnl, 2),
+            "realized_pnl":        round(total_realized_pnl, 2),
+            "open_positions":      len(open_positions),
+        },
+        "open_positions":   open_positions,
+        "closed_positions": closed_positions,
+        "allocation":       allocation,
+    })
+
+
 @app.route("/api/subscribe", methods=["POST"])
 def subscribe():
     """

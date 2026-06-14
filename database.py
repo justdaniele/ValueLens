@@ -77,6 +77,24 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sent_alerts_ticker ON sent_alerts (ticker, sent_at)")
 
+    # Virtual portfolio — tracks simulated positions opened from AI picks
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS virtual_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            target_price REAL,
+            shares REAL NOT NULL,
+            position_value REAL NOT NULL,
+            opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            closed_at TIMESTAMP DEFAULT NULL,
+            close_price REAL DEFAULT NULL,
+            close_reason TEXT DEFAULT NULL,
+            pnl_pct REAL DEFAULT NULL,
+            status TEXT DEFAULT 'OPEN'
+        )
+    """)
+
     # Schema migration — safely add new columns to existing tables
     # Uses try/except because SQLite has no IF NOT EXISTS for ALTER TABLE
     migrations = [
@@ -246,5 +264,121 @@ def record_alert_sent(ticker: str, alert_type: str = "fundamental"):
         "INSERT INTO sent_alerts (ticker, alert_type) VALUES (?, ?)",
         (ticker, alert_type)
     )
+    conn.commit()
+    conn.close()
+
+# ---------------------------------------------------------------------------
+# Virtual Portfolio
+# ---------------------------------------------------------------------------
+
+PORTFOLIO_STARTING_CASH = 100_000.0
+POSITION_SIZE_PCT       = 0.05   # 5% per position = max 20 concurrent positions
+STOP_LOSS_PCT           = 0.20   # -20% stop loss
+HOLD_DAYS               = 90     # Close after 90 days if target not reached
+
+
+def get_portfolio_cash(conn=None) -> float:
+    """Returns available cash = starting capital minus sum of open position values."""
+    close_conn = conn is None
+    if conn is None:
+        conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COALESCE(SUM(position_value), 0) FROM virtual_positions WHERE status = 'OPEN'")
+    invested = cursor.fetchone()[0] or 0.0
+    if close_conn:
+        conn.close()
+    return max(0.0, PORTFOLIO_STARTING_CASH - invested)
+
+
+def open_virtual_position(ticker: str, entry_price: float, target_price: float = None):
+    """Opens a virtual position if sufficient cash is available.
+
+    Position size = 5% of starting capital ($5,000).
+    Returns True if position was opened.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # Check if position already open for this ticker
+    cursor.execute("SELECT id FROM virtual_positions WHERE ticker = ? AND status = 'OPEN'", (ticker,))
+    if cursor.fetchone():
+        conn.close()
+        return False
+
+    cash = get_portfolio_cash(conn)
+    position_value = PORTFOLIO_STARTING_CASH * POSITION_SIZE_PCT  # $5,000
+
+    if cash < position_value:
+        logger.info(f"Portfolio: insufficient cash (${cash:,.0f}) to open {ticker} position.")
+        conn.close()
+        return False
+
+    if not entry_price or entry_price <= 0:
+        conn.close()
+        return False
+
+    shares = position_value / entry_price
+
+    cursor.execute("""
+        INSERT INTO virtual_positions (ticker, entry_price, target_price, shares, position_value)
+        VALUES (?, ?, ?, ?, ?)
+    """, (ticker, entry_price, target_price, shares, position_value))
+    conn.commit()
+    conn.close()
+    logger.info(f"Portfolio: opened {ticker} @ ${entry_price:.2f} ({shares:.2f} shares, ${position_value:,.0f})")
+    return True
+
+
+def evaluate_virtual_positions():
+    """Checks all open positions against exit conditions and closes them if met.
+
+    Exit conditions (checked in order):
+    1. Target price reached → close WIN
+    2. Stop loss -20% → close STOP
+    3. 90 days elapsed → close TIME
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, ticker, entry_price, target_price, shares, opened_at
+        FROM virtual_positions WHERE status = 'OPEN'
+    """)
+    positions = cursor.fetchall()
+
+    if not positions:
+        conn.close()
+        return
+
+    for row in positions:
+        pos_id, ticker, entry_price, target_price, shares, opened_at = row
+        try:
+            curr_price = yf.Ticker(ticker).fast_info.last_price
+            if not curr_price:
+                continue
+
+            pnl_pct = ((curr_price - entry_price) / entry_price) * 100
+            days_held = (datetime.now() - datetime.fromisoformat(opened_at)).days
+
+            close_reason = None
+            if target_price and curr_price >= target_price:
+                close_reason = "TARGET"
+            elif pnl_pct <= -STOP_LOSS_PCT * 100:
+                close_reason = "STOP"
+            elif days_held >= HOLD_DAYS:
+                close_reason = "TIME"
+
+            if close_reason:
+                cursor.execute("""
+                    UPDATE virtual_positions
+                    SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP,
+                        close_price = ?, close_reason = ?, pnl_pct = ?
+                    WHERE id = ?
+                """, (curr_price, close_reason, pnl_pct, pos_id))
+                logger.info(f"Portfolio: closed {ticker} @ ${curr_price:.2f} ({pnl_pct:+.1f}%) — {close_reason}")
+
+        except Exception as e:
+            logger.warning(f"Portfolio evaluation failed for {ticker}: {e}")
+
     conn.commit()
     conn.close()

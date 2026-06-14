@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 from analyzer import analyze_company
-from database import DB_NAME, init_db, save_report_to_db, was_recently_alerted, record_alert_sent
+from database import DB_NAME, init_db, save_report_to_db, was_recently_alerted, record_alert_sent, open_virtual_position, evaluate_virtual_positions
 
 load_dotenv()
 
@@ -483,8 +483,15 @@ def execute_nightly_routine():
         # Mark ticker as alerted in unified deduplication table
         record_alert_sent(ticker, alert_type="fundamental")
 
+        # Open virtual portfolio position for this pick
+        if c_price:
+            open_virtual_position(ticker, entry_price=c_price, target_price=t_price)
+
     # Persist tonight's winners list for the insider engine
     _write_nightly_winners(nightly_winners)
+
+    # Evaluate existing virtual positions for exit conditions
+    evaluate_virtual_positions()
 
     logger.info("=" * 60)
     logger.info(f"Nightly pipeline complete. New reports: {len(nightly_winners)}")

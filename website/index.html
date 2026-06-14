@@ -113,7 +113,7 @@ nav {
 
 /* ─── Hero ─── */
 .hero {
-  padding: 64px 28px 52px; text-align: center;
+  padding: 44px 28px 36px; text-align: center;
   border-bottom: 1px solid var(--border); position: relative; overflow: hidden;
 }
 .hero::before {
@@ -619,7 +619,7 @@ footer {
   <div class="hero-eyebrow">
     <i class="ti ti-cpu"></i> Automated overnight scan
   </div>
-  <h1>Institutional-grade equity<br/><span>intelligence. Every morning.</span></h1>
+  <h1>Institutional-grade equity intelligence.<br/><span>Every morning.</span></h1>
   <p class="hero-sub">ValueLens scans the S&amp;P 500 and Nasdaq 100 overnight, processes fundamentals through AI, and surfaces ranked opportunities before the market opens.</p>
   <div class="hero-stats">
     <div class="hero-stat">
@@ -633,13 +633,13 @@ footer {
     </div>
     <div class="hero-divider"></div>
     <div class="hero-stat">
-      <div class="hero-stat-val" id="stat-accuracy">—</div>
-      <div class="hero-stat-label">historical hit rate</div>
-    </div>
-    <div class="hero-divider"></div>
-    <div class="hero-stat">
       <div class="hero-stat-val" id="stat-combos">—</div>
       <div class="hero-stat-label">golden combos</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">
+      <div class="hero-stat-val" id="stat-portfolio" style="color:var(--green)">$100k</div>
+      <div class="hero-stat-label">virtual portfolio →</div>
     </div>
   </div>
 </section>
@@ -720,6 +720,22 @@ footer {
     </div>
     <div id="combos-grid" class="combo-grid">
       <div class="loading-state"><div class="spinner"></div> Cross-referencing signals...</div>
+    </div>
+  </div>
+</section>
+
+<!-- Virtual Portfolio Teaser -->
+<section class="section" id="portfolio-teaser" style="padding: 0 0 48px;">
+  <div class="section-inner">
+    <div style="background: linear-gradient(135deg, rgba(29,158,117,0.08) 0%, rgba(15,23,41,0) 60%); border: 1px solid var(--green-border); border-radius: 16px; padding: 32px 36px; display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;">
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); margin-bottom: 8px;">Virtual Portfolio · Educational</div>
+        <div style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px;">$100k Challenge</div>
+        <div style="font-size: 13px; color: var(--text-muted); max-width: 480px;">Every AI pick automatically becomes a simulated trade. Track open positions, P&L, and portfolio allocation in real time — powered by the same nightly scan.</div>
+      </div>
+      <a href="/portfolio.html" style="display: inline-flex; align-items: center; gap: 8px; background: var(--green); color: #fff; font-weight: 700; font-size: 13px; padding: 12px 24px; border-radius: 99px; text-decoration: none; white-space: nowrap; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+        View Portfolio <i class="ti ti-arrow-right"></i>
+      </a>
     </div>
   </div>
 </section>

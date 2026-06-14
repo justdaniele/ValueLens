@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ValueLens — Virtual Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0A0F1E;
+  --bg-card: #0F1729;
+  --bg-surface: #162034;
+  --border: rgba(255,255,255,0.07);
+  --border-hi: rgba(255,255,255,0.12);
+  --text: #E2E8F0;
+  --text-muted: #64748B;
+  --text-dim: #2D3F5A;
+  --green: #1D9E75;
+  --green-light: #5DCAA5;
+  --green-bg: rgba(29,158,117,0.08);
+  --green-border: rgba(29,158,117,0.22);
+  --red: #DC2626;
+  --red-bg: rgba(220,38,38,0.08);
+  --amber: #D97706;
+  --gold: #C89B3C;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Space Grotesk', sans-serif;
+  --r: 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; min-height: 100vh; }
+
+/* ── Disclaimer ── */
+.disclaimer { background: rgba(217,119,6,0.08); border-bottom: 1px solid rgba(217,119,6,0.2); padding: 10px 24px; font-size: 11px; color: #D97706; text-align: center; line-height: 1.5; }
+.disclaimer b { font-weight: 700; }
+
+/* ── Nav ── */
+nav { display: flex; align-items: center; justify-content: space-between; padding: 0 28px; height: 56px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(10,15,30,0.92); backdrop-filter: blur(12px); z-index: 100; }
+.nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; text-decoration: none; color: var(--text); }
+.nav-logo-icon { width: 30px; height: 30px; background: var(--green); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.nav-back { font-size: 12px; color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 6px; transition: color 0.2s; }
+.nav-back:hover { color: var(--text); }
+
+/* ── Page layout ── */
+.page { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+
+/* ── Hero ── */
+.port-hero { margin-bottom: 36px; }
+.port-hero-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
+.port-hero-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.port-hero-sub { font-size: 13px; color: var(--text-muted); max-width: 520px; }
+
+/* ── Summary cards ── */
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 32px; }
+@media (max-width: 700px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+.summary-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; }
+.summary-card.highlight { border-color: var(--green-border); background: var(--green-bg); }
+.summary-card.loss { border-color: rgba(220,38,38,0.25); background: var(--red-bg); }
+.sc-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.sc-val { font-size: 22px; font-weight: 700; font-family: var(--mono); color: var(--text); }
+.sc-val.pos { color: var(--green); }
+.sc-val.neg { color: var(--red); }
+.sc-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+/* ── Two-column layout ── */
+.port-grid { display: grid; grid-template-columns: 340px 1fr; gap: 24px; margin-bottom: 32px; }
+@media (max-width: 860px) { .port-grid { grid-template-columns: 1fr; } }
+
+/* ── Pie chart card ── */
+.chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; display: flex; flex-direction: column; }
+.card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+.card-title i { color: var(--green); font-size: 16px; }
+.chart-wrap { position: relative; width: 200px; height: 200px; margin: 0 auto 20px; }
+.chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.chart-center-val { font-size: 18px; font-weight: 700; font-family: var(--mono); color: var(--text); }
+.chart-center-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.legend { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-ticker { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 48px; }
+.legend-pct { color: var(--text-muted); margin-left: auto; font-family: var(--mono); font-size: 11px; }
+
+/* ── Open positions card ── */
+.positions-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; }
+.pos-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.pos-table th { padding: 8px 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: left; border-bottom: 1px solid var(--border); }
+.pos-table td { padding: 12px 12px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+.pos-table tbody tr:last-child td { border-bottom: none; }
+.pos-table tbody tr:hover td { background: rgba(255,255,255,0.015); }
+.pos-ticker { font-family: var(--mono); font-weight: 700; font-size: 14px; }
+.pos-price { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.pos-pnl-pos { color: var(--green); font-weight: 700; font-family: var(--mono); }
+.pos-pnl-neg { color: var(--red); font-weight: 700; font-family: var(--mono); }
+.pos-date { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.pos-target { font-size: 11px; color: var(--text-muted); }
+
+/* ── Closed positions ── */
+.closed-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; }
+.close-badge { font-size: 10px; padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.cb-target { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.cb-stop   { background: var(--red-bg); color: var(--red); border: 1px solid rgba(220,38,38,0.25); }
+.cb-time   { background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ── Empty state ── */
+.empty { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
+.empty i { font-size: 32px; display: block; margin-bottom: 12px; opacity: 0.4; }
+
+/* ── Loading ── */
+.loading { text-align: center; padding: 60px; color: var(--text-muted); }
+
+/* ── Footer ── */
+.port-footer { border-top: 1px solid var(--border); margin-top: 60px; padding-top: 24px; font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="disclaimer">
+  <b>Educational simulation only.</b> This virtual portfolio tracks hypothetical positions generated by an AI system for learning and research purposes. Nothing on this page constitutes financial advice, investment recommendations, or solicitation to buy or sell securities. Past simulated performance is not indicative of future results. Always conduct your own due diligence. UK FCA / EU MiFID II compliant.
+</div>
+
+<nav>
+  <a class="nav-logo" href="/">
+    <div class="nav-logo-icon">💎</div>
+    ValueLens
+  </a>
+  <a class="nav-back" href="/">
+    <i class="ti ti-arrow-left"></i> Back to dashboard
+  </a>
+</nav>
+
+<div class="page" id="page-content">
+  <div class="loading"><i class="ti ti-loader" style="font-size:28px;display:block;margin-bottom:12px;opacity:0.4"></i>Loading portfolio...</div>
+</div>
+
+<script>
+const API = '';
+
+async function fetchJSON(url) {
+  const r = await fetch(API + url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+const CHART_COLORS = [
+  '#1D9E75','#3B82F6','#D97706','#8B5CF6','#EC4899',
+  '#06B6D4','#F59E0B','#10B981','#6366F1','#EF4444',
+  '#14B8A6','#F97316','#A855F7','#84CC16','#0EA5E9',
+  '#F43F5E','#22C55E','#EAB308','#64748B','#78716C',
+];
+
+function fmt(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtPct(n) { const s = n >= 0 ? '+' : ''; return s + n.toFixed(2) + '%'; }
+
+async function loadPortfolio() {
+  try {
+    const data = await fetchJSON('/api/portfolio');
+    renderPortfolio(data);
+  } catch(e) {
+    document.getElementById('page-content').innerHTML =
+      `<div class="empty"><i class="ti ti-alert-circle"></i>Could not load portfolio data.<br>${e.message}</div>`;
+  }
+}
+
+function renderPortfolio(data) {
+  const s = data.summary;
+  const openPos = data.open_positions || [];
+  const closedPos = data.closed_positions || [];
+  const alloc = data.allocation || [];
+
+  const returnPos = s.total_return_pct >= 0;
+  const returnCls = returnPos ? 'pos' : 'neg';
+  const returnCard = returnPos ? 'highlight' : 'loss';
+
+  // Summary cards
+  const summaryHTML = `
+    <div class="summary-grid">
+      <div class="summary-card ${returnCard}">
+        <div class="sc-label">Portfolio Value</div>
+        <div class="sc-val ${returnCls}">${fmt(s.portfolio_value)}</div>
+        <div class="sc-sub">Started at ${fmt(s.starting_cash)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">Total Return</div>
+        <div class="sc-val ${returnCls}">${fmtPct(s.total_return_pct)}</div>
+        <div class="sc-sub">Unrealized + Realized P&L</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">Cash Available</div>
+        <div class="sc-val">${fmt(s.cash_available)}</div>
+        <div class="sc-sub">${s.open_positions} positions open</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">Realized P&L</div>
+        <div class="sc-val ${s.realized_pnl >= 0 ? 'pos' : 'neg'}">${fmt(s.realized_pnl)}</div>
+        <div class="sc-sub">From ${closedPos.length} closed trades</div>
+      </div>
+    </div>`;
+
+  // Pie chart
+  const total = alloc.reduce((a, b) => a + b.value, 0);
+  const chartColors = alloc.map((_, i) => i === alloc.length - 1 ? 'rgba(255,255,255,0.08)' : CHART_COLORS[i % CHART_COLORS.length]);
+
+  const legendHTML = alloc.map((a, i) => {
+    const pct = total > 0 ? (a.value / total * 100).toFixed(1) : '0';
+    const color = chartColors[i];
+    return `<div class="legend-item">
+      <div class="legend-dot" style="background:${color}"></div>
+      <span class="legend-ticker">${a.ticker}</span>
+      <span style="font-size:12px;color:var(--text)">${fmt(a.value)}</span>
+      <span class="legend-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+
+  const chartCard = `
+    <div class="chart-card">
+      <div class="card-title"><i class="ti ti-chart-pie"></i> Allocation</div>
+      <div class="chart-wrap">
+        <canvas id="alloc-chart"></canvas>
+        <div class="chart-center">
+          <div class="chart-center-val">${fmt(total)}</div>
+          <div class="chart-center-label">total value</div>
+        </div>
+      </div>
+      <div class="legend">${legendHTML || '<div class="empty" style="padding:16px">No positions yet</div>'}</div>
+    </div>`;
+
+  // Open positions table
+  let openRows = '';
+  if (openPos.length === 0) {
+    openRows = '<div class="empty"><i class="ti ti-briefcase"></i>No open positions.<br>Positions open automatically after the nightly scan.</div>';
+  } else {
+    openRows = `<table class="pos-table">
+      <thead><tr>
+        <th>Ticker</th><th>Entry</th><th>Current</th><th>P&L</th><th>Target</th><th>Opened</th>
+      </tr></thead>
+      <tbody>
+        ${openPos.map(p => {
+          const pnlCls = p.pnl_pct >= 0 ? 'pos-pnl-pos' : 'pos-pnl-neg';
+          const pnlStr = `${fmtPct(p.pnl_pct)} (${fmt(p.pnl_abs)})`;
+          const curr = p.current_price ? fmt(p.current_price) : '—';
+          const target = p.target_price ? fmt(p.target_price) : '—';
+          // Progress to target
+          let progressHTML = '';
+          if (p.target_price && p.current_price && p.entry_price) {
+            const progress = Math.min(100, Math.max(0, (p.current_price - p.entry_price) / (p.target_price - p.entry_price) * 100));
+            progressHTML = `<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;margin-top:4px;width:80px">
+              <div style="height:100%;width:${progress}%;background:var(--green);border-radius:99px"></div>
+            </div>`;
+          }
+          return `<tr>
+            <td><span class="pos-ticker">${p.ticker}</span></td>
+            <td><span class="pos-price">${fmt(p.entry_price)}</span></td>
+            <td><span class="pos-price" style="color:var(--text)">${curr}</span></td>
+            <td><span class="${pnlCls}">${pnlStr}</span></td>
+            <td><span class="pos-target">${target}${progressHTML}</span></td>
+            <td><span class="pos-date">${p.opened_at || '—'}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  }
+
+  const posCard = `
+    <div class="positions-card">
+      <div class="card-title"><i class="ti ti-trending-up"></i> Open Positions (${openPos.length})</div>
+      ${openRows}
+    </div>`;
+
+  // Closed positions
+  let closedRows = '';
+  if (closedPos.length === 0) {
+    closedRows = '<div class="empty" style="padding:24px"><i class="ti ti-history"></i>No closed positions yet.</div>';
+  } else {
+    closedRows = `<table class="pos-table">
+      <thead><tr>
+        <th>Ticker</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Reason</th><th>Held</th>
+      </tr></thead>
+      <tbody>
+        ${closedPos.map(p => {
+          const pnlCls = p.pnl_pct >= 0 ? 'pos-pnl-pos' : 'pos-pnl-neg';
+          const reason = p.close_reason || '—';
+          const badgeCls = reason === 'TARGET' ? 'cb-target' : reason === 'STOP' ? 'cb-stop' : 'cb-time';
+          const reasonLabel = reason === 'TARGET' ? '🎯 Target' : reason === 'STOP' ? '🛑 Stop' : '⏱ Time';
+          return `<tr>
+            <td><span class="pos-ticker">${p.ticker}</span></td>
+            <td><span class="pos-price">${fmt(p.entry_price)}</span></td>
+            <td><span class="pos-price" style="color:var(--text)">${p.close_price ? fmt(p.close_price) : '—'}</span></td>
+            <td><span class="${pnlCls}">${fmtPct(p.pnl_pct)} (${fmt(p.pnl_abs)})</span></td>
+            <td><span class="close-badge ${badgeCls}">${reasonLabel}</span></td>
+            <td><span class="pos-date">${p.opened_at || '—'} → ${p.closed_at || '—'}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  }
+
+  const closedCard = `
+    <div class="closed-card">
+      <div class="card-title" style="margin-bottom:16px"><i class="ti ti-history"></i> Closed Positions (${closedPos.length})</div>
+      ${closedRows}
+    </div>`;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="port-hero">
+      <div class="port-hero-label">Virtual Portfolio · Educational Simulation</div>
+      <div class="port-hero-title">$100k Challenge</div>
+      <div class="port-hero-sub">Tracks AI-generated picks from ValueLens nightly scans. Positions open automatically at $5,000 each (5% of capital). Exit: target price hit, −20% stop loss, or 90-day hold.</div>
+    </div>
+    ${summaryHTML}
+    <div class="port-grid">
+      ${chartCard}
+      ${posCard}
+    </div>
+    ${closedCard}
+    <div class="port-footer">
+      <b>Disclaimer:</b> This is a simulated educational portfolio for demonstrating AI equity analysis. No real money is involved. All picks are generated algorithmically and do not constitute investment advice. Past simulated performance does not guarantee future results. ValueLens is not a licensed financial advisor. Always consult a qualified professional before making investment decisions.
+    </div>`;
+
+  // Init pie chart
+  if (alloc.length > 0) {
+    const ctx = document.getElementById('alloc-chart').getContext('2d');
+    new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: alloc.map(a => a.ticker),
+        datasets: [{
+          data: alloc.map(a => a.value),
+          backgroundColor: chartColors,
+          borderWidth: 2,
+          borderColor: 'var(--bg-card)',
+          hoverBorderWidth: 2,
+        }]
+      },
+      options: {
+        cutout: '68%',
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ` ${ctx.label}: $${Number(ctx.parsed).toLocaleString('en-US', {maximumFractionDigits:0})}` }
+        }},
+        animation: { animateRotate: true, duration: 600 }
+      }
+    });
+  }
+}
+
+loadPortfolio();
+</script>
+</body>
+</html>
