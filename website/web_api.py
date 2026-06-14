@@ -33,6 +33,10 @@ logger = logging.getLogger("ValueLensAPI")
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = BASE_DIR  # index.html lives next to web_api.py
 
+import time as _time
+_picks_cache: dict = {"data": None, "ts": 0.0}
+_PICKS_TTL_SECS = 3600
+
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 
 # Allow requests from any origin — restrict to your domain in production
@@ -47,6 +51,19 @@ SUBSCRIBERS_DB = os.path.join(BASE_DIR, "subscribers.db")
 def index():
     """Serve the main frontend page."""
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory(STATIC_DIR, "manifest.json")
+
+
+@app.route("/sw.js")
+def service_worker():
+    resp = send_from_directory(STATIC_DIR, "sw.js")
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    return resp
 
 # ─────────────────────────────────────────────
 # Helpers
@@ -156,6 +173,8 @@ def meta():
 
 @app.route("/api/picks")
 def picks():
+    if _picks_cache["data"] and (_time.time() - _picks_cache["ts"]) < _PICKS_TTL_SECS:
+        return jsonify(_picks_cache["data"])
     """
     Returns the top picks from the most recent nightly scan.
     Fetches both EN and IT reports and merges them per ticker.
@@ -673,6 +692,32 @@ def portfolio():
         "allocation":       allocation,
     })
 
+
+
+@app.route("/api/weekly_earnings")
+def weekly_earnings():
+    """Returns earnings predictions from the last 14 days with EES scores."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ticker, price_at_signal, prediction, ees_score,
+               date(timestamp) as signal_date
+        FROM earnings_predictions
+        WHERE date(timestamp) >= date('now', '-14 days')
+        ORDER BY ees_score DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        result.append({
+            "ticker":          r["ticker"],
+            "prediction":      r["prediction"],
+            "ees_score":       r["ees_score"] or 0,
+            "signal_date":     r["signal_date"],
+            "price_at_signal": r["price_at_signal"],
+        })
+    return jsonify(result)
 
 @app.route("/api/subscribe", methods=["POST"])
 def subscribe():
