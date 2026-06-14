@@ -257,6 +257,24 @@ nav {
 .insiders-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .insider-count-badge { background: rgba(255,255,255,0.07); border: 1px solid var(--border); border-radius: 99px; padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 
+/* ─── Earnings Sniper table ─── */
+.earnings-table { width: 100%; border-collapse: collapse; }
+.earnings-table th { padding: 9px 16px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: left; border-bottom: 1px solid var(--border); }
+.earnings-table td { padding: 13px 16px; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.earnings-table tbody tr:last-child td { border-bottom: none; }
+.earnings-table tbody tr:hover td { background: rgba(255,255,255,0.018); }
+.earn-ticker { font-family: var(--mono); font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
+.earn-bull { display: inline-flex; align-items: center; gap: 5px; color: #1d9e75; font-weight: 700; font-size: 11px; letter-spacing: 0.06em; background: rgba(29,158,117,0.12); border: 1px solid rgba(29,158,117,0.25); padding: 3px 10px; border-radius: 99px; }
+.earn-bear { display: inline-flex; align-items: center; gap: 5px; color: #e05252; font-weight: 700; font-size: 11px; letter-spacing: 0.06em; background: rgba(224,82,82,0.12); border: 1px solid rgba(224,82,82,0.25); padding: 3px 10px; border-radius: 99px; }
+.earn-price { font-family: var(--mono); font-size: 13px; }
+.earn-chg-pos { color: #1d9e75; font-weight: 700; font-family: var(--mono); }
+.earn-chg-neg { color: #e05252; font-weight: 700; font-family: var(--mono); }
+.earn-chg-neu { color: var(--text-muted); }
+.earn-evaluated { font-size: 10px; padding: 3px 9px; border-radius: 99px; font-weight: 600; letter-spacing: 0.04em; }
+.earn-eval-yes { background: rgba(29,158,117,0.12); color: #1d9e75; border: 1px solid rgba(29,158,117,0.2); }
+.earn-eval-no  { background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid var(--border); }
+.earn-date { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+
 /* ─── Pick indicator sections ─── */
 .pick-indicators { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; }
 
@@ -1135,41 +1153,49 @@ async function loadEarnings() {
     const data = await fetchJSON('/api/earnings');
     if (badge) badge.textContent = data.length + ' predictions';
     if (!data.length) {
-      wrap.innerHTML = '<div class="empty-state">No earnings predictions yet. The sniper runs daily at 12:30 PM.</div>';
+      wrap.innerHTML = '<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">No earnings predictions yet — the sniper runs daily at 12:30 PM.</div>';
       return;
     }
     const rows = data.map(r => {
-      const predBadge = r.prediction === 'BULLISH'
-        ? '<span class="earn-bull">&#9650; BULLISH</span>'
-        : '<span class="earn-bear">&#9660; BEARISH</span>';
-      let chgCell = '<span class="earn-chg-neu">&#8212;</span>';
+      const isBull = r.prediction === 'BULLISH';
+      const predBadge = isBull
+        ? '<span class="earn-bull"><svg width="8" height="8" viewBox="0 0 8 8"><path d="M4 1L7 7H1L4 1Z" fill="currentColor"/></svg>BULLISH</span>'
+        : '<span class="earn-bear"><svg width="8" height="8" viewBox="0 0 8 8"><path d="M4 7L1 1H7L4 7Z" fill="currentColor"/></svg>BEARISH</span>';
+
+      let chgCell = '<span class="earn-chg-neu">—</span>';
       if (r.change_pct !== null && r.change_pct !== undefined) {
         const sign = r.change_pct >= 0 ? '+' : '';
         const cls  = r.change_pct >= 0 ? 'earn-chg-pos' : 'earn-chg-neg';
         chgCell = '<span class="' + cls + '">' + sign + r.change_pct.toFixed(2) + '%</span>';
       }
+
       const evalBadge = r.is_evaluated
-        ? '<span class="earn-evaluated earn-eval-yes">Evaluated</span>'
+        ? '<span class="earn-evaluated earn-eval-yes">&#10003; Evaluated</span>'
         : '<span class="earn-evaluated earn-eval-no">Pending</span>';
+
       return '<tr>' +
-        '<td><span class="it-ticker mono">' + r.ticker + '</span></td>' +
+        '<td><span class="earn-ticker">' + r.ticker + '</span></td>' +
         '<td>' + predBadge + '</td>' +
-        '<td><span class="it-price mono">$' + Number(r.price_signal||0).toFixed(2) + '</span></td>' +
-        '<td>' + (r.price_current ? '$' + r.price_current.toFixed(2) : '&#8212;') + '</td>' +
+        '<td><span class="earn-price">$' + Number(r.price_signal || 0).toFixed(2) + '</span></td>' +
+        '<td><span class="earn-price">' + (r.price_current ? '$' + r.price_current.toFixed(2) : '—') + '</span></td>' +
         '<td>' + chgCell + '</td>' +
         '<td>' + evalBadge + '</td>' +
-        '<td><span class="it-date">' + (r.timestamp||'&#8212;') + '</span></td>' +
+        '<td><span class="earn-date">' + (r.timestamp || '—') + '</span></td>' +
         '</tr>';
     }).join('');
-    wrap.innerHTML = '<table class="earnings-table"><thead><tr>' +
-      '<th>Ticker</th><th>Prediction</th><th>Price at Signal</th>' +
+
+    wrap.innerHTML =
+      '<table class="earnings-table">' +
+      '<thead><tr>' +
+      '<th>Ticker</th><th>Signal</th><th>Price at Signal</th>' +
       '<th>Current Price</th><th>Change</th><th>Status</th><th>Date</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table>';
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+      '</table>';
   } catch(e) {
-    if (wrap) wrap.innerHTML = '<div class="error-state">Could not load earnings data.</div>';
+    if (wrap) wrap.innerHTML = '<div style="padding:24px;color:var(--text-muted);font-size:13px">Could not load earnings data.</div>';
   }
 }
-
 
 async function loadInsiders() {
   const wrap = document.getElementById('insiders-wrap');
