@@ -569,63 +569,6 @@ def earnings():
     return jsonify(result)
 
 
-@app.route("/api/live_prices")
-def live_prices():
-    """Returns current prices for all active tickers via direct Yahoo Finance query.
-
-    Uses a single HTTP call to Yahoo Finance for all tickers simultaneously.
-    Called every 10 seconds by the frontend during US market hours only.
-    Returns {ticker: price} dict — null if price unavailable.
-    """
-    conn = get_db()
-    cursor = conn.cursor()
-
-    # Collect all tickers currently visible on the dashboard
-    cursor.execute("""
-        SELECT DISTINCT ticker FROM nightly_reports
-        WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
-    """)
-    pick_tickers = [r["ticker"] for r in cursor.fetchall()]
-
-    cursor.execute("SELECT DISTINCT ticker FROM insider_signals WHERE status = 'ACTIVE'")
-    insider_tickers = [r["ticker"] for r in cursor.fetchall()]
-
-    cursor.execute("SELECT DISTINCT ticker FROM virtual_positions WHERE status = 'OPEN'")
-    portfolio_tickers = [r["ticker"] for r in cursor.fetchall()]
-
-    conn.close()
-
-    all_tickers = list(set(pick_tickers + insider_tickers + portfolio_tickers))
-    if not all_tickers:
-        return jsonify({})
-
-    # Single Yahoo Finance batch query — much faster than yfinance library
-    symbols = ",".join(all_tickers)
-    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols}&fields=regularMarketPrice,regularMarketChangePercent"
-
-    try:
-        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
-        if resp.status_code != 200:
-            return jsonify({})
-
-        quotes = resp.json().get("quoteResponse", {}).get("result", [])
-        prices = {}
-        for q in quotes:
-            ticker = q.get("symbol")
-            price  = q.get("regularMarketPrice")
-            change = q.get("regularMarketChangePercent")
-            if ticker and price:
-                prices[ticker] = {
-                    "price":  round(price, 2),
-                    "change": round(change, 2) if change is not None else 0.0,
-                }
-        return jsonify(prices)
-
-    except Exception as e:
-        logger.warning(f"Live prices fetch failed: {e}")
-        return jsonify({})
-
-
 @app.route("/api/portfolio")
 def portfolio():
     """Returns virtual portfolio summary and all positions."""
