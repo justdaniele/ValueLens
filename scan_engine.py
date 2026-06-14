@@ -166,7 +166,7 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
 
     # Step 2: Parse each Form 4 XML for P-code transactions
     purchases = []
-    for acc in accessions[:8]:
+    for acc in accessions[:20]:  # Check up to 20 filings to cover full 90-day window
         acc_dashed = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
         # Use the company's CIK for the archive path
         index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{acc_dashed}-index.htm"
