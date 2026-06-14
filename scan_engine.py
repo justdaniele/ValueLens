@@ -215,7 +215,7 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
                     shares = float(shares_el.text) if shares_el is not None else 0.0
                     price  = float(price_el.text)  if price_el  is not None else 0.0
                     total  = shares * price
-                    if total >= 100_000:
+                    if total >= 50_000:  # Lower threshold for manual /scan vs auto alerts ($500k)
                         purchases.append({
                             "name":    name,
                             "title":   title,
