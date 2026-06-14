@@ -10,6 +10,7 @@ from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy
 from earnings_engine import send_alert_to_channel, run_earnings_pipeline
 from weekly_engine import generate_and_broadcast_weekly_recap
 from insider_engine import run_insider_tracking
+from scan_engine import run_full_scan
 
 load_dotenv()
 
@@ -117,6 +118,20 @@ async def incoming_commands_polling_loop():
                             "🟢 <b>ValueLens Systems Operational</b>\n"
                             "• Mode: <code>ACTIVE</code>"
                         )
+
+                    elif command == "/scan":
+                        # Full on-demand ticker scan — admin only
+                        parts = text.split()
+                        if len(parts) < 2:
+                            reply = "❌ Usage: /scan TICKER (e.g. /scan AAPL)"
+                        else:
+                            scan_ticker = parts[1].upper().strip()
+                            # Run scan in background thread — non-blocking
+                            asyncio.create_task(
+                                asyncio.to_thread(run_full_scan, scan_ticker, chat_id)
+                            )
+                            # No reply needed — scan_engine sends its own messages
+                            reply = ""
 
                     if reply:
                         def _send_reply(c=chat_id, r=reply):
