@@ -123,53 +123,69 @@ def _get_cik(ticker: str):
 def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
     """Fetches confirmed open-market purchases (Form 4, code P) from EDGAR.
 
-    Uses the submissions API for reliable accession number retrieval,
-    then parses each Form 4 XML directly — only P-code transactions are returned.
+    Uses the quarterly full-index (same approach as insider_engine) to find ALL
+    Form 4 filings for a company CIK — including those filed by third-party agents
+    which would be missed by the submissions API.
     """
     cik = _get_cik(ticker)
     if not cik:
         return []
 
-    cik_padded = cik.zfill(10)
     today  = datetime.date.today()
     cutoff = today - datetime.timedelta(days=days_back)
 
-    # Step 1: Get recent Form 4 accessions via submissions API
-    sub_url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
-    try:
-        resp = requests.get(sub_url, headers=EDGAR_HEADERS, timeout=20)
-        if resp.status_code != 200:
-            return []
-        data    = resp.json()
-        filings = data.get("filings", {}).get("recent", {})
-        forms   = filings.get("form", [])
-        dates   = filings.get("filingDate", [])
-        accnums = filings.get("accessionNumber", [])
-    except Exception as e:
-        logger.debug(f"Submissions API failed for {ticker}: {e}")
-        return []
+    # Build quarters to cover lookback window
+    quarters = set()
+    d = cutoff
+    while d <= today:
+        quarters.add((d.year, (d.month - 1) // 3 + 1))
+        d = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
 
-    # Filter to Form 4 filings within lookback window
+    import re as _re
     accessions = []
-    for form, filed, acc in zip(forms, dates, accnums):
-        if form != "4":
-            continue
+
+    for year, quarter in sorted(quarters):
+        idx_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/form.idx"
         try:
-            if datetime.date.fromisoformat(filed) < cutoff:
-                break  # Results are reverse chronological — stop early
-            accessions.append(acc.replace("-", ""))
+            resp = requests.get(idx_url, headers=EDGAR_HEADERS, timeout=20)
+            if resp.status_code != 200:
+                continue
+
+            data_start = 0
+            for i, line in enumerate(resp.text.splitlines()):
+                if line.startswith("-----"):
+                    data_start = i + 1
+                    break
+
+            for line in resp.text.splitlines()[data_start:]:
+                parts = _re.split(r"  +", line.strip())
+                if len(parts) < 5 or parts[0].strip() != "4":
+                    continue
+                try:
+                    filing_cik  = parts[2].strip()
+                    date_filed  = parts[3].strip()
+                    filename    = parts[4].strip()
+                    if filing_cik != cik:
+                        continue
+                    if datetime.date.fromisoformat(date_filed) < cutoff:
+                        continue
+                    acc = filename.split("/")[-1].replace(".txt", "").replace("-", "")
+                    accessions.append((acc, filing_cik))
+                except Exception:
+                    pass
+            time.sleep(0.3)
         except Exception:
-            pass
+            continue
 
     if not accessions:
         return []
 
-    # Step 2: Parse each Form 4 XML for P-code transactions
+    # Parse each Form 4 XML for P-code transactions
     purchases = []
-    for acc in accessions[:20]:  # Check up to 20 filings to cover full 90-day window
+    for acc, filing_cik in accessions[:20]:
         acc_dashed = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
-        # Use the company's CIK for the archive path
-        index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{acc_dashed}-index.htm"
+        # Use the company CIK for the archive path (not the filer CIK)
+        index_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{acc_dashed}-index.htm"
         sec_url   = index_url
 
         try:
@@ -177,22 +193,18 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
             if idx_r.status_code != 200:
                 continue
 
-            # Find the primary Form 4 XML — exclude xsl/ subdirectory links
-            xml_matches = re.findall(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_r.text)
+            xml_matches = _re.findall(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_r.text)
+            # Prefer URL without xsl subfolder
             xml_url = None
             for m in xml_matches:
-                # Skip XSLT renderer paths and pick the raw XML
-                if "xsl" not in m.lower() and "viewer" not in m.lower():
+                if "xsl" not in m.lower():
                     xml_url = "https://www.sec.gov" + m
                     break
             if not xml_url and xml_matches:
-                # Fallback: strip the xsl subfolder from the path
-                raw = xml_matches[0]
-                parts = raw.split("/")
-                # Remove xslXXX folder if present
-                clean_parts = [p for p in parts if not p.startswith("xsl")]
-                xml_url = "https://www.sec.gov" + "/".join(clean_parts)
-
+                # Strip xsl subfolder manually
+                raw   = xml_matches[0]
+                parts = [p for p in raw.split("/") if not p.startswith("xsl")]
+                xml_url = "https://www.sec.gov" + "/".join(parts)
             if not xml_url:
                 continue
 
@@ -203,9 +215,7 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
             try:
                 root = ET.fromstring(xml_r.content)
             except ET.ParseError:
-                # Try stripping XML declaration issues
-                content_str = xml_r.text
-                root = ET.fromstring(content_str.encode("utf-8"))
+                continue
 
             name_el  = root.find(".//reportingOwner/reportingOwnerId/rptOwnerName")
             title_el = root.find(".//reportingOwner/reportingOwnerRelationship/officerTitle")

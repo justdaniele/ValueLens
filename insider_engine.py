@@ -91,10 +91,19 @@ def _parse_form4_p_code(cik: str, accession: str) -> list:
         idx_resp = requests.get(index_url, headers=EDGAR_HEADERS, timeout=10)
         if idx_resp.status_code != 200:
             return []
-        xml_match = re.search(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_resp.text)
-        if not xml_match:
+        # Find all XML links — prefer non-xsl paths (raw Form 4 XML)
+        xml_matches = re.findall(r'href="(/Archives/edgar/data/[^"]+\.xml)"', idx_resp.text)
+        if not xml_matches:
             return []
-        xml_url = "https://www.sec.gov" + xml_match.group(1)
+        xml_url = None
+        for m in xml_matches:
+            if "xsl" not in m.lower():
+                xml_url = "https://www.sec.gov" + m
+                break
+        if not xml_url:
+            # Fallback: strip xsl subfolder from first match
+            parts = [p for p in xml_matches[0].split("/") if not p.startswith("xsl")]
+            xml_url = "https://www.sec.gov" + "/".join(parts)
     except Exception:
         return []
 
