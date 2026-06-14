@@ -77,6 +77,19 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sent_alerts_ticker ON sent_alerts (ticker, sent_at)")
 
+    # Schema migration — safely add new columns to existing tables
+    # Uses try/except because SQLite has no IF NOT EXISTS for ALTER TABLE
+    migrations = [
+        "ALTER TABLE insider_signals ADD COLUMN total_value REAL DEFAULT 0.0",
+        "ALTER TABLE insider_signals ADD COLUMN num_transactions INTEGER DEFAULT 0",
+        "ALTER TABLE earnings_predictions ADD COLUMN ees_score INTEGER DEFAULT 0",
+    ]
+    for migration in migrations:
+        try:
+            cursor.execute(migration)
+        except Exception:
+            pass  # Column already exists — skip silently
+
     conn.commit()
     conn.close()
     logger.info("Database schema initialized and fully matched with tracking engines.")
