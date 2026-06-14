@@ -1270,13 +1270,32 @@ async function fetchInsiderLivePrices() {
   }
 }
 
-function toggleInsiderRow(idx) {
+async function toggleInsiderRow(idx, ticker) {
   const detail = document.getElementById(`insider-detail-${idx}`);
   const chev   = document.getElementById(`insider-chev-${idx}`);
   if (!detail) return;
   const isOpen = detail.classList.contains('open');
   detail.classList.toggle('open', !isOpen);
   if (chev) chev.classList.toggle('open', !isOpen);
+  if (!isOpen && detail.dataset.loaded !== '1') {
+    detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading...</span>';
+    try {
+      const txs = await fetchJSON('/api/insider_transactions/' + ticker);
+      const secUrl = 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + ticker + '&type=4&owner=include&count=10';
+      const lines = txs.length ? txs.map(tx => {
+        const name = tx.insider_name || 'Insider';
+        const role = tx.title ? ' <span class="insider-tx-role">— ' + tx.title + '</span>' : '';
+        const shares = tx.shares > 0 ? Number(tx.shares).toLocaleString() + ' shares' : '';
+        const price = tx.price > 0 ? ' @ $' + tx.price.toFixed(2) : '';
+        const val = tx.total_value > 0 ? ' = $' + Number(tx.total_value).toLocaleString(undefined,{maximumFractionDigits:0}) : '';
+        return '<div class="insider-tx"><span class="insider-tx-name">' + name + role + '</span><span class="insider-tx-detail">' + shares + price + val + '</span><span class="insider-tx-date">' + tx.date + '</span><a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a></div>';
+      }).join('') : '<span style="color:var(--text-muted);font-size:12px">No transactions found ≥ $500k in last 90 days.</span>';
+      detail.querySelector('.insider-detail-inner').innerHTML = lines;
+      detail.dataset.loaded = '1';
+    } catch(e) {
+      detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--red);font-size:12px">Failed to load.</span>';
+    }
+  }
 }
 
 let insiderLivePrices = {};
