@@ -77,6 +77,24 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sent_alerts_ticker ON sent_alerts (ticker, sent_at)")
 
+    # Stores individual Form 4 P-code transactions with accession numbers for precise SEC links
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS insider_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            insider_name TEXT,
+            title TEXT,
+            shares REAL DEFAULT 0.0,
+            price REAL DEFAULT 0.0,
+            total_value REAL DEFAULT 0.0,
+            date TEXT,
+            accession_no TEXT,
+            sec_url TEXT,
+            detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_insider_tx_ticker ON insider_transactions (ticker, detected_at)")
+
     # Virtual portfolio — tracks simulated positions opened from AI picks
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS virtual_positions (
@@ -266,6 +284,54 @@ def record_alert_sent(ticker: str, alert_type: str = "fundamental"):
     )
     conn.commit()
     conn.close()
+
+def save_insider_transactions(ticker: str, transactions: list):
+    """Saves individual Form 4 P-code transactions to the database.
+
+    Each transaction dict must have: insider_name, title, shares, price,
+    total_value, date, accession_no, sec_url.
+    Old transactions for this ticker are replaced to avoid duplicates.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    # Remove old transactions for this ticker before inserting fresh ones
+    cursor.execute("DELETE FROM insider_transactions WHERE ticker = ?", (ticker,))
+    for tx in transactions:
+        cursor.execute("""
+            INSERT INTO insider_transactions
+            (ticker, insider_name, title, shares, price, total_value, date, accession_no, sec_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ticker,
+            tx.get("insider_name", ""),
+            tx.get("title", ""),
+            tx.get("shares", 0.0),
+            tx.get("price", 0.0),
+            tx.get("total_value", 0.0),
+            tx.get("date", ""),
+            tx.get("accession_no", ""),
+            tx.get("sec_url", ""),
+        ))
+    conn.commit()
+    conn.close()
+
+
+def get_insider_transactions(ticker: str) -> list:
+    """Returns stored Form 4 transactions for a ticker from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT insider_name, title, shares, price, total_value, date, accession_no, sec_url
+        FROM insider_transactions
+        WHERE ticker = ?
+        ORDER BY total_value DESC
+        LIMIT 10
+    """, (ticker,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
 
 # ---------------------------------------------------------------------------
 # Virtual Portfolio
