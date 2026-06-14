@@ -114,7 +114,7 @@ def _get_cik(ticker: str):
             data = json.load(f)
         for entry in data.values():
             if entry.get("ticker", "").upper() == ticker.upper():
-                return str(entry["cik_str"]).zfill(10)
+                return str(entry["cik_str"])  # Raw CIK, no padding — matches EDGAR index format
     except Exception:
         pass
     return None
@@ -161,7 +161,7 @@ def _get_recent_insider_buys(ticker: str, days_back: int = 90) -> list:
                 if len(parts) < 5 or parts[0].strip() != "4":
                     continue
                 try:
-                    filing_cik  = parts[2].strip().zfill(10)
+                    filing_cik  = parts[2].strip()
                     date_filed  = parts[3].strip()
                     filename    = parts[4].strip()
                     if filing_cik != cik:
