@@ -1229,17 +1229,14 @@ async function loadInsiders() {
       wrap.innerHTML = '<div class="empty-state">No insider signals detected in the last 90 days.</div>';
       return;
     }
+    // Always fetch prices — last_price returns closing price even when market is closed
+    await fetchInsiderLivePrices();
     renderInsiderTable();
-    // If market is open, fetch live prices and refresh every 5 minutes
-    if (isMarketOpen()) {
+    // Refresh every 5 minutes during market hours
+    setInterval(async () => {
       await fetchInsiderLivePrices();
-      setInterval(async () => {
-        if (isMarketOpen()) {
-          await fetchInsiderLivePrices();
-          updateMarketStatusBadge();
-        }
-      }, 5 * 60 * 1000); // 5 minutes
-    }
+      updateMarketStatusBadge();
+    }, 5 * 60 * 1000);
   } catch(e) {
     wrap.innerHTML = `<div class="error-state" style="margin:0;border-radius:0;"><i class="ti ti-alert-circle"></i> Could not load insider data. (${e.message})</div>`;
   }
