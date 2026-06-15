@@ -212,11 +212,14 @@ async def core_scheduler_loop():
 
             def step_target_dt(h, m):
                 """Returns target datetime for h:m relative to now_snap.
+
                 Post-midnight steps (hour < 8) are placed on the next calendar day
-                to preserve cycle order: 08:00 -> 12:30 -> 22:30 -> 01:00.
+                only when the bot is running during normal daytime hours (>= 08:00).
+                If the bot restarts after midnight (00:00–07:59), post-midnight steps
+                that haven't fired yet are kept on the same calendar day.
                 """
                 base = now_snap.replace(hour=h, minute=m, second=0, microsecond=0)
-                if h < 8:
+                if h < 8 and now_snap.hour >= 8:
                     base += datetime.timedelta(days=1)
                 return base
 
