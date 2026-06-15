@@ -109,11 +109,6 @@ def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) 
         return []
 
 
-# In-process universe cache — avoids re-reading files on repeated calls within same process
-_universe_cache: list = []
-_universe_cache_date: str = ""
-
-
 def get_us_market_universe() -> list:
     """
     Returns a single deduplicated list of tickers from all configured universes.
@@ -121,12 +116,6 @@ def get_us_market_universe() -> list:
     The screening pipeline is completely index-agnostic — it just sees one list.
     Controlled by SCAN_UNIVERSE env var (default: sp500,nasdaq100).
     """
-    global _universe_cache, _universe_cache_date
-    import datetime as _dt
-    _today = str(_dt.date.today())
-    if _universe_cache and _universe_cache_date == _today:
-        return _universe_cache
-
     seen   = set()
     merged = []
 
@@ -146,8 +135,6 @@ def get_us_market_universe() -> list:
         logger.info(f"NASDAQ-100 contributed {nasdaq_only} exclusive tickers.")
 
     logger.info(f"Combined universe: {len(merged)} unique tickers (config: '{SCAN_UNIVERSE}')")
-    _universe_cache = merged
-    _universe_cache_date = _today
     return merged
 
 
@@ -455,7 +442,12 @@ def execute_nightly_routine():
         logger.error("Universe is empty — aborting.")
         return
 
-    value_universe   = filter_value_universe(universe)
+    # Pre-filter universe — remove tickers alerted in the last 14 days
+    # This runs BEFORE any yfinance or DeepSeek calls, saving time and API credits
+    pre_filtered = [t for t in universe if not was_recently_alerted(t, cooldown_days=14)]
+    logger.info(f"Pre-filter: {len(universe)} → {len(pre_filtered)} tickers after 14-day cooldown.")
+
+    value_universe   = filter_value_universe(pre_filtered)
     fast_candidates  = fast_value_screen(value_universe)
     total_candidates = deep_value_screen(fast_candidates)
 
@@ -470,8 +462,8 @@ def execute_nightly_routine():
         c_price = info.get("currentPrice") or info.get("regularMarketPrice")
         t_price = info.get("targetMeanPrice")
 
-        # Deduplication: skip tickers alerted in the last 5 days
-        if was_recently_alerted(ticker, cooldown_days=5):
+        # Deduplication: skip tickers alerted in the last 14 days
+        if was_recently_alerted(ticker, cooldown_days=14):
             logger.info(f"Skipping {ticker} — alerted within cooldown window.")
             continue
 
