@@ -169,7 +169,7 @@ async def run_earnings_pipeline(silent: bool = False):
             direction    = "BULLISH" if final_ees >= 0 else "BEARISH"
             direction_it = "RIALZISTA" if final_ees >= 0 else "RIBASSISTA"
 
-            save_earnings_prediction(ticker, curr_price, direction)
+            save_earnings_prediction(ticker, curr_price, direction, ees_score=final_ees)
 
             if abs(final_ees) >= EES_FIRE_THRESHOLD:
                 msg_en = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"
