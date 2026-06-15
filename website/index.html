@@ -768,6 +768,22 @@ footer {
   </div>
 </section>
 
+<!-- Virtual Portfolio Teaser -->
+<section class="section" id="portfolio-teaser" style="padding: 0 0 48px;">
+  <div class="section-inner">
+    <div style="background: linear-gradient(135deg, rgba(29,158,117,0.08) 0%, rgba(15,23,41,0) 60%); border: 1px solid var(--green-border); border-radius: 16px; padding: 32px 36px; display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;">
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); margin-bottom: 8px;">Virtual Portfolio · Educational</div>
+        <div style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px;">$100k Challenge</div>
+        <div style="font-size: 13px; color: var(--text-muted); max-width: 480px;">Every AI pick automatically becomes a simulated trade. Track open positions, P&amp;L, and portfolio allocation in real time — powered by the same nightly scan.</div>
+      </div>
+      <a href="/portfolio.html" style="display: inline-flex; align-items: center; gap: 8px; background: var(--green); color: #fff; font-weight: 700; font-size: 13px; padding: 12px 24px; border-radius: 99px; text-decoration: none; white-space: nowrap; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+        View Portfolio <i class="ti ti-arrow-right"></i>
+      </a>
+    </div>
+  </div>
+</section>
+
 <!-- Telegram Channels -->
 <section class="section" id="telegram">
   <div class="section-inner">
@@ -1334,13 +1350,38 @@ async function fetchInsiderLivePrices() {
   }
 }
 
-function toggleInsiderRow(idx) {
+async function toggleInsiderRow(idx, ticker) {
   const detail = document.getElementById(`insider-detail-${idx}`);
   const chev   = document.getElementById(`insider-chev-${idx}`);
   if (!detail) return;
   const isOpen = detail.classList.contains('open');
   detail.classList.toggle('open', !isOpen);
   if (chev) chev.classList.toggle('open', !isOpen);
+  if (!isOpen && detail.dataset.loaded !== '1') {
+    detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading...</span>';
+    try {
+      const txs = await fetchJSON('/api/insider_transactions/' + ticker);
+      const fallbackUrl = 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + ticker + '&type=4&owner=include&count=10';
+      const lines = txs.length ? txs.map(tx => {
+        const name   = tx.insider_name || 'Insider';
+        const role   = tx.title ? ' <span class="insider-tx-role">— ' + tx.title + '</span>' : '';
+        const shares = tx.shares > 0 ? Number(tx.shares).toLocaleString() + ' shares' : '';
+        const price  = tx.price > 0 ? ' @ $' + tx.price.toFixed(2) : '';
+        const val    = tx.total_value > 0 ? ' = $' + Number(tx.total_value).toLocaleString(undefined,{maximumFractionDigits:0}) : '';
+        const secUrl = tx.sec_url || fallbackUrl;
+        return '<div class="insider-tx">'
+          + '<span class="insider-tx-name">' + name + role + '</span>'
+          + '<span class="insider-tx-detail">' + shares + price + val + '</span>'
+          + '<span class="insider-tx-date">' + (tx.date || '') + '</span>'
+          + '<a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a>'
+          + '</div>';
+      }).join('') : '<span style="color:var(--text-muted);font-size:12px">No P-code purchases found in last 90 days.</span>';
+      detail.querySelector('.insider-detail-inner').innerHTML = lines;
+      detail.dataset.loaded = '1';
+    } catch(e) {
+      detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--red);font-size:12px">Failed to load.</span>';
+    }
+  }
 }
 
 let insiderLivePrices = {};
