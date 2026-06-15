@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ValueLens — Automated Equity Intelligence</title>
 <meta name="description" content="Institutional-grade equity intelligence. AI-powered fundamental analysis of S&P 500 and Nasdaq 100, delivered every morning." />
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#1D9E75"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="ValueLens"/>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
@@ -548,6 +553,16 @@ nav {
   border-radius: 7px; color: var(--green); font-size: 13px; margin-bottom: 10px;
 }
 
+/* ─── Weekly Earnings ─── */
+.we-table { width:100%; border-collapse:collapse; }
+.we-table th { padding:8px 12px; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); text-align:left; border-bottom:1px solid var(--border); }
+.we-table td { padding:12px; font-size:13px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:middle; }
+.we-table tbody tr:last-child td { border-bottom:none; }
+.we-ticker { font-family:var(--mono); font-weight:700; font-size:14px; }
+.we-date { font-size:11px; color:var(--text-muted); font-family:var(--mono); }
+.we-bull { color:var(--green); font-weight:700; font-size:11px; }
+.we-bear { color:var(--red); font-weight:700; font-size:11px; }
+
 /* ─── Footer ─── */
 footer {
   padding: 28px; border-top: 1px solid var(--border);
@@ -715,6 +730,25 @@ footer {
   </div>
 </section>
 
+<!-- Weekly Earnings Calendar -->
+<section class="section" id="weekly-earnings">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-title-group">
+        <div class="section-icon si-blue"><i class="ti ti-calendar-event"></i></div>
+        <div>
+          <div class="section-title">This Week's Earnings</div>
+          <div class="section-sub">AI directional predictions for earnings events this week</div>
+        </div>
+      </div>
+      <span class="badge-count" id="weekly-earnings-count">—</span>
+    </div>
+    <div id="weekly-earnings-body">
+      <div class="loading-state"><div class="spinner"></div> Loading...</div>
+    </div>
+  </div>
+</section>
+
 <!-- Golden Combos -->
 <section class="section" id="golden">
   <div class="section-inner">
@@ -869,7 +903,7 @@ async function fetchJSON(endpoint) {
 // ─── Load all sections ───
 async function loadAll() {
   updateMarketStatusBadge();
-  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos()]);
+  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos(), loadWeeklyEarnings()]);
   // Start live price updates every 10 seconds during market hours
   startLivePriceUpdates();
 }
@@ -1147,13 +1181,9 @@ function toggleChart(i, ticker) {
       const ctx = document.getElementById(`chart-${i}`);
       if (!ctx) return;
       if (chartInstances[i]) chartInstances[i].destroy();
-
-      const lastP   = d.prices[d.prices.length - 1];
-      const firstP  = d.prices[0];
+      const lastP = d.prices[d.prices.length-1], firstP = d.prices[0];
       const lineCol = lastP >= firstP ? '#1D9E75' : '#DC2626';
       const fillCol = lastP >= firstP ? 'rgba(29,158,117,0.07)' : 'rgba(220,38,38,0.07)';
-
-      // Price + MA20 chart
       chartInstances[i] = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1161,9 +1191,8 @@ function toggleChart(i, ticker) {
           datasets: [
             { data: d.prices, borderColor: lineCol, backgroundColor: fillCol,
               fill: true, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
-            { data: d.ma20,  borderColor: '#3B82F6', borderWidth: 1,
-              borderDash: [4,3], pointRadius: 0, fill: false, tension: 0.4,
-              spanGaps: true }
+            { data: d.ma20, borderColor: '#3B82F6', borderWidth: 1,
+              borderDash: [4,3], pointRadius: 0, fill: false, tension: 0.4, spanGaps: true }
           ]
         },
         options: {
@@ -1175,27 +1204,20 @@ function toggleChart(i, ticker) {
           }
         }
       });
-
-      // RSI sub-chart
       const rsiCtx = document.getElementById(`rsi-chart-${i}`);
       if (rsiCtx && d.rsi) {
         const rsiNow = d.current_rsi;
         const rsiCol = rsiNow >= 70 ? '#DC2626' : rsiNow <= 30 ? '#1D9E75' : '#D97706';
         new Chart(rsiCtx, {
           type: 'line',
-          data: {
-            labels: d.labels,
-            datasets: [{ data: d.rsi, borderColor: rsiCol, borderWidth: 1.2,
-              pointRadius: 0, fill: false, tension: 0.4, spanGaps: true }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
+          data: { labels: d.labels, datasets: [{ data: d.rsi, borderColor: rsiCol,
+            borderWidth: 1.2, pointRadius: 0, fill: false, tension: 0.4, spanGaps: true }] },
+          options: { responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false } },
             scales: {
               x: { ticks: { display: false }, grid: { display: false }, border: { display: false } },
               y: { min: 0, max: 100,
-                ticks: { color: '#475569', font: { size: 8 }, stepSize: 70,
-                  callback: v => [30,70].includes(v) ? v : '' },
+                ticks: { color: '#475569', font: { size: 8 }, callback: v => [30,70].includes(v) ? v : '' },
                 grid: { color: ctx2 => [30,70].includes(ctx2.tick?.value) ? 'rgba(255,255,255,0.1)' : 'transparent' },
                 border: { display: false } }
             }
@@ -1536,6 +1558,55 @@ function startLivePriceUpdates() {
   }, 10_000); // Every 10 seconds
 }
 
+</script>
+<script>
+async function loadWeeklyEarnings() {
+  try {
+    const data = await fetchJSON('/api/weekly_earnings');
+    const badge = document.getElementById('weekly-earnings-count');
+    const body  = document.getElementById('weekly-earnings-body');
+    if (badge) badge.textContent = data.length + ' events';
+    if (!data.length) {
+      if (body) body.innerHTML = '<div class="empty-state">No earnings events in the last 14 days.</div>';
+      return;
+    }
+    const rows = data.map(e => {
+      const isBull = e.prediction === 'BULLISH';
+      const ees = e.ees_score || 0;
+      const barW = Math.min(100, Math.abs(ees) / 70 * 100).toFixed(0);
+      const barCol = isBull ? 'var(--green)' : 'var(--red)';
+      const sign = ees >= 0 ? '+' : '';
+      return `<tr>
+        <td><span class="we-ticker">${e.ticker}</span></td>
+        <td><span class="${isBull ? 'we-bull' : 'we-bear'}">${isBull ? '▲ BULLISH' : '▼ BEARISH'}</span></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:80px;height:4px;background:rgba(255,255,255,.06);border-radius:99px">
+              <div style="width:${barW}%;height:100%;background:${barCol};border-radius:99px"></div>
+            </div>
+            <span style="font-family:var(--mono);font-size:11px;color:${barCol}">${sign}${ees}/70</span>
+          </div>
+        </td>
+        <td><span class="we-date">${e.signal_date || '—'}</span></td>
+        <td><span style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${e.price_at_signal ? '$'+Number(e.price_at_signal).toFixed(2) : '—'}</span></td>
+      </tr>`;
+    }).join('');
+    if (body) body.innerHTML = `<table class="we-table">
+      <thead><tr><th>Ticker</th><th>Prediction</th><th>EES Signal</th><th>Date</th><th>Price at Signal</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } catch(e) {
+    const body = document.getElementById('weekly-earnings-body');
+    if (body) body.innerHTML = '<div class="empty-state">No data available.</div>';
+  }
+}
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
