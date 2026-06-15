@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import yfinance as yf
 from database import DB_NAME, was_recently_alerted, record_alert_sent, save_insider_transactions
 from earnings_engine import send_alert_to_channel
-from scanner import get_us_market_universe, get_nightly_winners
+from scanner import get_core_universe_tickers, get_nightly_winners
 
 logger = logging.getLogger("InsiderEngine")
 
@@ -310,7 +310,8 @@ def run_insider_tracking():
     """
     logger.info("Initializing Insider Tracking Engine (EDGAR Form 4, P-code filter)...")
 
-    universe = get_us_market_universe()
+    # Insider tracking is restricted to sp500 + nasdaq100 (core large-cap universe)
+    universe = get_core_universe_tickers()
     if not universe:
         logger.warning("Universe empty — aborting.")
         return

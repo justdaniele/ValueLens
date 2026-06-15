@@ -176,15 +176,16 @@ def picks():
     if _picks_cache["data"] and (_time.time() - _picks_cache["ts"]) < _PICKS_TTL_SECS:
         return jsonify(_picks_cache["data"])
     """
-    Returns the top picks from the most recent nightly scan.
-    Fetches both EN and IT reports and merges them per ticker.
-    Score is approximated from target vs current price upside.
+    Returns top picks from the most recent nightly scan, grouped by universe index.
+    Response shape: {"sp500": [...], "nasdaq100": [...], "sp400": [...], "russell1000": [...]}
+    Each pick also carries a universe_source field for flat-list consumers.
     """
     conn = get_db()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT ticker, report_text, lang, current_price, target_price, date_generated
+        SELECT ticker, report_text, lang, current_price, target_price, date_generated,
+               COALESCE(universe_source, 'sp500') as universe_source
         FROM nightly_reports
         WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
         ORDER BY date_generated DESC
@@ -204,12 +205,14 @@ def picks():
                 "report_en": None,
                 "report_it": None,
                 "name": None,
-                "signals": []
+                "signals": [],
+                "universe_source": r["universe_source"],
             }
         if r["lang"] == "en":
             by_ticker[t]["report_en"] = r["report_text"]
-            by_ticker[t]["price"]  = r["current_price"]
-            by_ticker[t]["target"] = r["target_price"]
+            by_ticker[t]["price"]          = r["current_price"]
+            by_ticker[t]["target"]         = r["target_price"]
+            by_ticker[t]["universe_source"] = r["universe_source"]
             try:
                 pe_val = yf.Ticker(t).info.get("trailingPE")
                 by_ticker[t]["pe"] = round(float(pe_val), 1) if pe_val else None
@@ -243,25 +246,38 @@ def picks():
         signals = _extract_signals(d["report_en"] or "")
 
         result.append({
-            "ticker": ticker,
-            "name": d.get("name") or ticker,
-            "price": d["price"],
-            "target": d["target"],
-            "upside": upside,
-            "score": score,
-            "pe": d.get("pe"),
-            "report_en": d["report_en"],
-            "report_it": d["report_it"],
-            "signals": signals,
-            "sections": sections,
-            "dcf_score":    sec_scores["dcf_score"],
-            "zombie_score": sec_scores["zombie_score"],
-            "short_score":  sec_scores["short_score"],
+            "ticker":         ticker,
+            "name":           d.get("name") or ticker,
+            "price":          d["price"],
+            "target":         d["target"],
+            "upside":         upside,
+            "score":          score,
+            "pe":             d.get("pe"),
+            "report_en":      d["report_en"],
+            "report_it":      d["report_it"],
+            "signals":        signals,
+            "sections":       sections,
+            "dcf_score":      sec_scores["dcf_score"],
+            "zombie_score":   sec_scores["zombie_score"],
+            "short_score":    sec_scores["short_score"],
+            "universe_source": d.get("universe_source", "sp500"),
         })
 
-    # Sort by score descending, limit to top 10
+    # Sort by score descending, limit to top 10 per index
     result.sort(key=lambda x: x["score"], reverse=True)
-    return jsonify(result[:10])
+
+    # Build grouped response — each index gets its top 10 picks
+    grouped = {"sp500": [], "nasdaq100": [], "sp400": [], "russell1000": []}
+    counts  = {"sp500": 0, "nasdaq100": 0, "sp400": 0, "russell1000": 0}
+    for pick in result:
+        src = pick.get("universe_source", "sp500")
+        if src in grouped and counts.get(src, 0) < 10:
+            grouped[src].append(pick)
+            counts[src] = counts.get(src, 0) + 1
+
+    _picks_cache["data"] = grouped
+    _picks_cache["ts"]   = _time.time()
+    return jsonify(grouped)
 
 
 def _parse_opportunity_score(report_text: str) -> int:

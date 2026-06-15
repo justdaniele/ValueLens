@@ -25,8 +25,8 @@ BOT_TOKEN     = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID_IT = os.environ.get("TELEGRAM_CHANNEL_ID_IT", "")
 CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
 
-# Which universes to scan — change via .env: SCAN_UNIVERSE=sp500,nasdaq100
-SCAN_UNIVERSE = os.environ.get("SCAN_UNIVERSE", "sp500,nasdaq100").lower()
+# Which universes to scan — change via .env: SCAN_UNIVERSE=sp500,nasdaq100,sp400,russell1000
+SCAN_UNIVERSE = os.environ.get("SCAN_UNIVERSE", "sp500,nasdaq100,sp400,russell1000").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +63,92 @@ def get_nasdaq100_tickers() -> list:
         symbol_col="Ticker",
         label="NASDAQ-100"
     )
+
+
+def get_sp400_tickers() -> list:
+    """Retrieves S&P 400 Mid-Cap tickers from local cache, refreshing from Wikipedia every 7 days."""
+    return _get_tickers_cached(
+        cache_file="sp400_tickers.txt",
+        url="https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+        symbol_col="Ticker",
+        label="S&P 400"
+    )
+
+
+def get_russell1000_tickers() -> list:
+    """Returns the top 1000 Russell 2000 tickers by market cap.
+
+    Fetches the full Russell 2000 list from Wikipedia, then sorts by market cap
+    using yfinance fast_info and returns the top 1000. Results are cached for 7 days.
+    Falls back to the raw Wikipedia list (up to 1000) if market cap fetch fails.
+    """
+    cache_file = "russell1000_tickers.txt"
+    cache_expiry_days = 7
+
+    if os.path.exists(cache_file):
+        file_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
+        if datetime.datetime.now() - file_time < datetime.timedelta(days=cache_expiry_days):
+            logger.info("Loading Russell 1000 universe from local cache.")
+            with open(cache_file, "r") as f:
+                return [line.strip() for line in f if line.strip()]
+
+    logger.info("Cache missing or expired. Building Russell 1000 by market cap from Wikipedia Russell 2000...")
+    try:
+        headers  = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(
+            "https://en.wikipedia.org/wiki/Russell_2000_Index",
+            headers=headers, timeout=15
+        )
+        response.raise_for_status()
+
+        tables = pd.read_html(response.text)
+        raw_tickers = None
+        for table in tables:
+            for col in ("Ticker", "Symbol", "ticker", "symbol"):
+                if col in table.columns:
+                    raw_tickers = [t.replace(".", "-") for t in table[col].dropna().tolist()]
+                    break
+            if raw_tickers:
+                break
+
+        if not raw_tickers:
+            raise ValueError("No ticker column found in Russell 2000 Wikipedia tables.")
+
+        logger.info(f"Fetched {len(raw_tickers)} raw Russell 2000 tickers. Sorting top 1000 by market cap...")
+
+        scored = []
+        for ticker in raw_tickers:
+            try:
+                mcap = yf.Ticker(ticker).fast_info.market_cap
+                if mcap and mcap > 0:
+                    scored.append((ticker, mcap))
+            except Exception:
+                pass
+            time.sleep(0.05)
+
+        # Sort descending by market cap and take top 1000
+        scored.sort(key=lambda x: x[1], reverse=True)
+        top1000 = [t for t, _ in scored[:1000]]
+
+        # Fallback: if market cap fetch retrieved fewer than 200 valid results, use raw list
+        if len(top1000) < 200:
+            logger.warning("Market cap sort yielded too few results — falling back to raw Wikipedia list (top 1000).")
+            top1000 = raw_tickers[:1000]
+
+        with open(cache_file, "w") as f:
+            for t in top1000:
+                f.write(f"{t}\n")
+
+        logger.info(f"Cached {len(top1000)} Russell 1000 tickers.")
+        return top1000
+
+    except Exception as e:
+        logger.error(f"Error building Russell 1000 list: {e}")
+        if os.path.exists(cache_file):
+            logger.warning("Returning expired Russell 1000 cache as fallback.")
+            with open(cache_file, "r") as f:
+                return [line.strip() for line in f if line.strip()]
+        return []
 
 
 def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) -> list:
@@ -111,31 +197,51 @@ def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) 
 
 def get_us_market_universe() -> list:
     """
-    Returns a single deduplicated list of tickers from all configured universes.
-    S&P 500 first, then NASDAQ-100 exclusives appended at the end.
-    The screening pipeline is completely index-agnostic — it just sees one list.
-    Controlled by SCAN_UNIVERSE env var (default: sp500,nasdaq100).
+    Returns a deduplicated list of tickers from all configured universes.
+    Each element is a dict: {"ticker": str, "universe_source": str}.
+    First-seen index wins deduplication (sp500 > nasdaq100 > sp400 > russell1000).
+    Earnings sniper and insider tracking only use sp500/nasdaq100 tickers.
+    Controlled by SCAN_UNIVERSE env var (default: sp500,nasdaq100,sp400,russell1000).
     """
     seen   = set()
     merged = []
 
-    if "sp500" in SCAN_UNIVERSE:
-        for t in get_sp500_tickers():
-            if t not in seen:
-                seen.add(t)
-                merged.append(t)
+    index_map = [
+        ("sp500",       get_sp500_tickers),
+        ("nasdaq100",   get_nasdaq100_tickers),
+        ("sp400",       get_sp400_tickers),
+        ("russell1000", get_russell1000_tickers),
+    ]
 
-    if "nasdaq100" in SCAN_UNIVERSE:
-        nasdaq_only = 0
-        for t in get_nasdaq100_tickers():
+    for source, fetcher in index_map:
+        if source not in SCAN_UNIVERSE:
+            continue
+        tickers = fetcher()
+        added = 0
+        for t in tickers:
             if t not in seen:
                 seen.add(t)
-                merged.append(t)
-                nasdaq_only += 1
-        logger.info(f"NASDAQ-100 contributed {nasdaq_only} exclusive tickers.")
+                merged.append({"ticker": t, "universe_source": source})
+                added += 1
+        logger.info(f"{source.upper()} contributed {added} unique tickers.")
 
     logger.info(f"Combined universe: {len(merged)} unique tickers (config: '{SCAN_UNIVERSE}')")
     return merged
+
+
+def get_core_universe_tickers() -> list:
+    """Returns a flat deduplicated list of ticker strings for sp500 and nasdaq100 only.
+
+    Used by earnings_engine and insider_engine, which are intentionally restricted
+    to the core large-cap universe regardless of the SCAN_UNIVERSE setting.
+    """
+    seen   = set()
+    result = []
+    for t in get_sp500_tickers() + get_nasdaq100_tickers():
+        if t not in seen:
+            seen.add(t)
+            result.append(t)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -146,9 +252,23 @@ def filter_value_universe(tickers: list, max_candidates=150, sleep_seconds=0.05)
     """
     First pass: cheap fast_info scan across the full universe.
     Sorts by deepest 52-week discount. Index-agnostic.
+
+    Args:
+        tickers: List of dicts {"ticker": str, "universe_source": str}
+                 or plain strings (backwards compatibility).
+    Returns:
+        List of dicts {"ticker": str, "universe_source": str, "discount": float}.
     """
     candidates = []
-    for i, ticker in enumerate(tickers):
+    for i, item in enumerate(tickers):
+        # Support both dict format (new) and plain string (legacy)
+        if isinstance(item, dict):
+            ticker = item["ticker"]
+            universe_source = item.get("universe_source", "sp500")
+        else:
+            ticker = item
+            universe_source = "sp500"
+
         if i % 100 == 0 and i > 0:
             logger.info(f"Filter progress: {i}/{len(tickers)}...")
         try:
@@ -158,21 +278,27 @@ def filter_value_universe(tickers: list, max_candidates=150, sleep_seconds=0.05)
 
             if high and current and high > 0:
                 discount = (high - current) / high
-                candidates.append({"ticker": ticker, "discount": discount})
+                candidates.append({"ticker": ticker, "universe_source": universe_source, "discount": discount})
         except Exception:
             pass
         time.sleep(sleep_seconds)
 
     candidates.sort(key=lambda x: x['discount'], reverse=True)
-    top_tickers = [c['ticker'] for c in candidates[:max_candidates]]
-    logger.info(f"Phase 1: {len(top_tickers)} candidates by 52w discount.")
-    return top_tickers
+    top = candidates[:max_candidates]
+    logger.info(f"Phase 1: {len(top)} candidates by 52w discount.")
+    return top
 
 
 def fast_value_screen(tickers_list: list, max_candidates=20) -> list:
-    """Second pass: narrows to the top N from the discount-sorted list."""
+    """Second pass: narrows to the top N from the discount-sorted list.
+
+    Args:
+        tickers_list: List of dicts from filter_value_universe.
+    Returns:
+        Top N dicts, universe_source preserved.
+    """
     top = tickers_list[:max_candidates]
-    logger.info(f"Phase 2 fast-screen: {top}")
+    logger.info(f"Phase 2 fast-screen: {[c['ticker'] for c in top]}")
     return top
 
 
@@ -182,11 +308,14 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
     Third pass: full .info fetch validating P/E ratio and analyst upside.
     pe_threshold overridable via PE_THRESHOLD env var.
     Returns list of dicts carrying the fetched info so callers don't re-fetch.
+    universe_source is preserved from the input list.
     """
     pe_threshold = int(os.environ.get("PE_THRESHOLD", pe_threshold))
     candidates   = []
 
-    for ticker in tickers_list:
+    for item in tickers_list:
+        ticker          = item["ticker"]
+        universe_source = item.get("universe_source", "sp500")
         try:
             logger.info(f"Deep scan: {ticker}...")
             info = yf.Ticker(ticker).info
@@ -201,7 +330,12 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
 
             if current and target_mean and current > 0:
                 upside = (target_mean - current) / current
-                candidates.append({"ticker": ticker, "upside": upside, "info": info})
+                candidates.append({
+                    "ticker": ticker,
+                    "universe_source": universe_source,
+                    "upside": upside,
+                    "info": info,
+                })
 
         except Exception as e:
             logger.warning(f"Deep scan skipped {ticker}: {e}")
@@ -432,6 +566,8 @@ def execute_nightly_routine():
     """
     Screens the combined universe and stores bilingual AI reports.
     Completely index-agnostic — works on whatever get_us_market_universe() returns.
+    Each pick is tagged with its universe_source and saved to the database.
+    Earnings sniper and insider tracking remain restricted to sp500/nasdaq100.
     """
     logger.info("=" * 60)
     logger.info("Starting ValueLens Bilingual Nightly Screening Routine")
@@ -442,9 +578,12 @@ def execute_nightly_routine():
         logger.error("Universe is empty — aborting.")
         return
 
-    # Pre-filter universe — remove tickers alerted in the last 14 days
-    # This runs BEFORE any yfinance or DeepSeek calls, saving time and API credits
-    pre_filtered = [t for t in universe if not was_recently_alerted(t, cooldown_days=14)]
+    # Pre-filter universe — remove tickers alerted in the last 14 days.
+    # universe is a list of dicts {"ticker": str, "universe_source": str}.
+    pre_filtered = [
+        item for item in universe
+        if not was_recently_alerted(item["ticker"], cooldown_days=14)
+    ]
     logger.info(f"Pre-filter: {len(universe)} → {len(pre_filtered)} tickers after 14-day cooldown.")
 
     value_universe   = filter_value_universe(pre_filtered)
@@ -457,10 +596,11 @@ def execute_nightly_routine():
     nightly_winners = []
 
     for candidate in total_candidates:
-        ticker  = candidate["ticker"]
-        info    = candidate.get("info") or {}
-        c_price = info.get("currentPrice") or info.get("regularMarketPrice")
-        t_price = info.get("targetMeanPrice")
+        ticker          = candidate["ticker"]
+        universe_source = candidate.get("universe_source", "sp500")
+        info            = candidate.get("info") or {}
+        c_price         = info.get("currentPrice") or info.get("regularMarketPrice")
+        t_price         = info.get("targetMeanPrice")
 
         # Deduplication: skip tickers alerted in the last 14 days
         if was_recently_alerted(ticker, cooldown_days=14):
@@ -470,17 +610,17 @@ def execute_nightly_routine():
         nightly_winners.append(ticker)
 
         try:
-            logger.info(f"Generating EN report for {ticker}...")
+            logger.info(f"Generating EN report for {ticker} [{universe_source}]...")
             report_en = analyze_company(ticker, mode="PRO", lang="en", company_info=info)
-            save_report_to_db(ticker, report_en, "en", current_price=c_price, target_price=t_price)
+            save_report_to_db(ticker, report_en, "en", current_price=c_price, target_price=t_price, universe_source=universe_source)
             time.sleep(10)
         except Exception as e:
             logger.error(f"EN analysis failed for {ticker}: {e}")
 
         try:
-            logger.info(f"Generating IT report for {ticker}...")
+            logger.info(f"Generating IT report for {ticker} [{universe_source}]...")
             report_it = analyze_company(ticker, mode="PRO", lang="it", company_info=info)
-            save_report_to_db(ticker, report_it, "it", current_price=c_price, target_price=t_price)
+            save_report_to_db(ticker, report_it, "it", current_price=c_price, target_price=t_price, universe_source=universe_source)
             time.sleep(10)
         except Exception as e:
             logger.error(f"IT analysis failed for {ticker}: {e}")

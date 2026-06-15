@@ -119,6 +119,7 @@ def init_db():
         "ALTER TABLE insider_signals ADD COLUMN total_value REAL DEFAULT 0.0",
         "ALTER TABLE insider_signals ADD COLUMN num_transactions INTEGER DEFAULT 0",
         "ALTER TABLE earnings_predictions ADD COLUMN ees_score INTEGER DEFAULT 0",
+        "ALTER TABLE nightly_reports ADD COLUMN universe_source TEXT DEFAULT 'sp500'",
     ]
     for migration in migrations:
         try:
@@ -131,14 +132,23 @@ def init_db():
     logger.info("Database schema initialized and fully matched with tracking engines.")
 
 
-def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None):
-    """Saves a generated AI report to the database."""
+def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None, universe_source="sp500"):
+    """Saves a generated AI report to the database.
+
+    Args:
+        ticker: Stock ticker symbol.
+        report_text: AI-generated HTML report text.
+        lang: Language code ('en' or 'it').
+        current_price: Price at analysis time.
+        target_price: Analyst consensus target price.
+        universe_source: Index the ticker belongs to ('sp500', 'nasdaq100', 'sp400', 'russell1000').
+    """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price)
-        VALUES (?, ?, ?, ?, ?)
-    """, (ticker, report_text, lang, current_price, target_price))
+        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price, universe_source)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (ticker, report_text, lang, current_price, target_price, universe_source))
     conn.commit()
     conn.close()
 

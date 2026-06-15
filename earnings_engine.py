@@ -9,7 +9,7 @@ import pandas as pd
 import yfinance as yf
 from analyzer import generate_earnings_sentiment_layer
 from database import save_earnings_prediction
-from scanner import get_us_market_universe, _sanitise_html
+from scanner import get_core_universe_tickers, _sanitise_html
 
 logger = logging.getLogger("EarningsEngine")
 
@@ -143,7 +143,8 @@ async def run_earnings_pipeline(silent: bool = False):
     Used for midday/additional runs to keep the dashboard fresh without spamming Telegram.
     """
     logger.info("Initiating Earnings Catalyst Sniper Engine...")
-    universe = get_us_market_universe()
+    # Earnings sniper is restricted to sp500 + nasdaq100 (core large-cap universe)
+    universe = get_core_universe_tickers()
     if not universe:
         logger.warning("Universe is empty — skipping earnings pipeline.")
         return

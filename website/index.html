@@ -563,6 +563,30 @@ nav {
 .we-bull { color:var(--green); font-weight:700; font-size:11px; }
 .we-bear { color:var(--red); font-weight:700; font-size:11px; }
 
+/* ─── Universe Tab Switcher ─── */
+.universe-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.universe-tab {
+  font-size: 12px; font-weight: 600; font-family: var(--mono);
+  padding: 5px 14px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); transition: all 0.15s; white-space: nowrap;
+}
+.universe-tab:hover { border-color: var(--border-hi); color: var(--text); }
+.universe-tab.active {
+  background: var(--green-bg); border-color: var(--green-border);
+  color: var(--green);
+}
+.universe-tab-count {
+  display: inline-block; margin-left: 5px;
+  background: rgba(255,255,255,0.07); border-radius: 10px;
+  padding: 0 6px; font-size: 10px; color: var(--text-muted);
+}
+.universe-tab.active .universe-tab-count {
+  background: var(--green-bg); color: var(--green);
+}
+
 /* ─── Footer ─── */
 footer {
   padding: 28px; border-top: 1px solid var(--border);
@@ -681,6 +705,21 @@ footer {
         </div>
       </div>
       <span class="badge-count" id="picks-count">loading...</span>
+    </div>
+    <!-- Universe tab switcher -->
+    <div class="universe-tabs" id="universe-tabs">
+      <button class="universe-tab active" data-universe="sp500" onclick="switchUniverseTab('sp500')">
+        S&amp;P 500 <span class="universe-tab-count" id="tab-count-sp500">—</span>
+      </button>
+      <button class="universe-tab" data-universe="nasdaq100" onclick="switchUniverseTab('nasdaq100')">
+        Nasdaq 100 <span class="universe-tab-count" id="tab-count-nasdaq100">—</span>
+      </button>
+      <button class="universe-tab" data-universe="sp400" onclick="switchUniverseTab('sp400')">
+        S&amp;P 400 <span class="universe-tab-count" id="tab-count-sp400">—</span>
+      </button>
+      <button class="universe-tab" data-universe="russell1000" onclick="switchUniverseTab('russell1000')">
+        Russell 1000 <span class="universe-tab-count" id="tab-count-russell1000">—</span>
+      </button>
     </div>
     <div id="picks-grid" class="picks-grid">
       <div class="loading-state"><div class="spinner"></div> Loading picks from database...</div>
@@ -948,16 +987,51 @@ async function loadMeta() {
 }
 
 // ─── Top Picks ───
+let picksGrouped = {"sp500": [], "nasdaq100": [], "sp400": [], "russell1000": []};
+let activeUniverse = "sp500";
+
 async function loadPicks() {
   const el = document.getElementById('picks-grid');
   try {
     const data = await fetchJSON('/api/picks');
-    picksData = data;
-    document.getElementById('picks-count').textContent = `${data.length} picks`;
-    renderPicks(data);
+    // data is now a grouped dict: {sp500: [...], nasdaq100: [...], sp400: [...], russell1000: [...]}
+    picksGrouped = data;
+
+    // Flatten for global picksData reference (used by live price updater)
+    picksData = Object.values(data).flat();
+
+    // Update tab counts
+    const tabLabels = {sp500: 'sp500', nasdaq100: 'nasdaq100', sp400: 'sp400', russell1000: 'russell1000'};
+    let totalCount = 0;
+    for (const [key] of Object.entries(tabLabels)) {
+      const arr = data[key] || [];
+      const countEl = document.getElementById('tab-count-' + key);
+      if (countEl) countEl.textContent = arr.length;
+      totalCount += arr.length;
+    }
+    document.getElementById('picks-count').textContent = `${totalCount} picks`;
+
+    // Render active tab
+    renderPicks(picksGrouped[activeUniverse] || []);
   } catch(e) {
     el.innerHTML = `<div class="error-state"><i class="ti ti-alert-circle"></i> Could not load picks — is the Pi API running? (${e.message})</div>`;
   }
+}
+
+function switchUniverseTab(universe) {
+  activeUniverse = universe;
+
+  // Update tab button styles
+  document.querySelectorAll('.universe-tab').forEach(function(btn) {
+    if (btn.getAttribute('data-universe') === universe) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Render the selected universe's picks
+  renderPicks(picksGrouped[universe] || []);
 }
 
 // Known NASDAQ-100 tickers for exchange label display
