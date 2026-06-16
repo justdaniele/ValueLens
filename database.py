@@ -421,6 +421,14 @@ def open_virtual_position(ticker: str, entry_price: float, target_price: float =
     conn.commit()
     conn.close()
     logger.info(f"Portfolio: opened {ticker} @ ${entry_price:.2f} ({shares:.2f} shares, ${position_value:,.0f})")
+
+    # Notify Telegram — lazy import avoids a circular dependency with scanner.py
+    try:
+        from scanner import notify_portfolio_event
+        notify_portfolio_event("OPEN", ticker, entry_price, {"target_price": target_price})
+    except Exception as e:
+        logger.warning(f"Portfolio OPEN notification failed for {ticker}: {e}")
+
     return True
 
 
@@ -471,6 +479,13 @@ def evaluate_virtual_positions():
                     WHERE id = ?
                 """, (curr_price, close_reason, pnl_pct, pos_id))
                 logger.info(f"Portfolio: closed {ticker} @ ${curr_price:.2f} ({pnl_pct:+.1f}%) — {close_reason}")
+
+                # Notify Telegram — lazy import avoids a circular dependency with scanner.py
+                try:
+                    from scanner import notify_portfolio_event
+                    notify_portfolio_event(close_reason, ticker, curr_price, {"pnl_pct": pnl_pct})
+                except Exception as e:
+                    logger.warning(f"Portfolio {close_reason} notification failed for {ticker}: {e}")
 
         except Exception as e:
             logger.warning(f"Portfolio evaluation failed for {ticker}: {e}")

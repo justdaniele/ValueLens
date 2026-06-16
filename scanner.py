@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 from analyzer import analyze_company
-from database import DB_NAME, init_db, save_report_to_db, was_recently_alerted, record_alert_sent, open_virtual_position, evaluate_virtual_positions
+from database import DB_NAME, init_db, save_report_to_db, open_virtual_position, evaluate_virtual_positions
 
 load_dotenv()
 
@@ -502,71 +502,54 @@ def get_nightly_winners() -> list:
     return []
 
 # ---------------------------------------------------------------------------
-# Morning broadcast
+# NOTE: morning_broadcast() was removed — Top Picks no longer go to Telegram.
+# They recalculate fresh every night on the website with no cooldown.
+# broadcast_to_channel() above is kept as a shared helper, now used by the
+# virtual portfolio Telegram notifications (see notify_portfolio_event below).
 # ---------------------------------------------------------------------------
 
-def morning_broadcast():
+def notify_portfolio_event(event: str, ticker: str, price: float, extra: dict = None):
+    """Sends a bilingual Telegram alert for a virtual portfolio event.
+
+    event: "OPEN", "TARGET", "STOP", or "TIME".
+    extra: optional dict with event-specific fields (e.g. pnl_pct, target_price).
+    Called by database.py's open_virtual_position() and evaluate_virtual_positions()
+    so every buy, sell, stop-loss, and time-exit is reported on Telegram.
     """
-    Routes pending reports to IT and EN channels.
-    Uses prices cached at analysis time — no yfinance re-fetch at 8 AM.
-    """
-    logger.info("Morning broadcast triggered.")
-    conn   = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    extra = extra or {}
 
-    channels = [
-        {
-            "id": CHANNEL_ID_IT, "lang": "it",
-            "header": "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Target rilevati:</i>\n",
-        },
-        {
-            "id": CHANNEL_ID_EN, "lang": "en",
-            "header": "🌅 <b>ValueLens Morning Intelligence</b>\n<i>Targets detected:</i>\n",
-        },
-    ]
+    if event == "OPEN":
+        msg_en = (f"🟢 <b>Virtual Portfolio: Opened {ticker}</b>\n\n"
+                  f"Entry price: <code>${price:.2f}</code>\n"
+                  f"Target: <code>${extra.get('target_price', 0):.2f}</code>" if extra.get("target_price")
+                  else f"🟢 <b>Virtual Portfolio: Opened {ticker}</b>\n\nEntry price: <code>${price:.2f}</code>")
+        msg_it = (f"🟢 <b>Portafoglio Virtuale: Apertura {ticker}</b>\n\n"
+                  f"Prezzo di entrata: <code>${price:.2f}</code>\n"
+                  f"Target: <code>${extra.get('target_price', 0):.2f}</code>" if extra.get("target_price")
+                  else f"🟢 <b>Portafoglio Virtuale: Apertura {ticker}</b>\n\nPrezzo di entrata: <code>${price:.2f}</code>")
 
-    for channel in channels:
-        if not channel["id"]:
-            continue
+    elif event in ("TARGET", "STOP", "TIME"):
+        pnl_pct = extra.get("pnl_pct", 0.0)
+        sign    = "+" if pnl_pct >= 0 else ""
+        icon    = "🎯" if event == "TARGET" else "🔴" if event == "STOP" else "⏱️"
+        label_en = {"TARGET": "Target reached", "STOP": "Stop-loss hit", "TIME": "Time exit (90 days)"}[event]
+        label_it = {"TARGET": "Target raggiunto", "STOP": "Stop-loss attivato", "TIME": "Uscita per tempo (90 giorni)"}[event]
 
-        # Search PENDING reports from the last 2 days to survive restarts and date boundaries
-        cursor.execute(
-            "SELECT ticker, report_text, current_price, target_price "
-            "FROM nightly_reports "
-            "WHERE date(date_generated) >= date('now', '-2 days') AND status = 'PENDING' AND lang = ?",
-            (channel["lang"],)
-        )
-        rows = cursor.fetchall()
-        if not rows:
-            continue
+        msg_en = (f"{icon} <b>Virtual Portfolio: Closed {ticker}</b>\n\n"
+                  f"Reason: <b>{label_en}</b>\n"
+                  f"Exit price: <code>${price:.2f}</code>\n"
+                  f"P&amp;L: <b>{sign}{pnl_pct:.1f}%</b>")
+        msg_it = (f"{icon} <b>Portafoglio Virtuale: Chiusura {ticker}</b>\n\n"
+                  f"Motivo: <b>{label_it}</b>\n"
+                  f"Prezzo di uscita: <code>${price:.2f}</code>\n"
+                  f"P&amp;L: <b>{sign}{pnl_pct:.1f}%</b>")
+    else:
+        return
 
-        broadcast_to_channel(channel["header"], channel["id"])
-
-        for ticker, report_text, stored_price, stored_target in rows:
-            formatted = f"<b>[ {ticker} ]</b>\n\n{report_text}\n\n〰️〰️〰️"
-
-            c_price = stored_price
-            t_price = stored_target
-
-            if not c_price:
-                try:
-                    c_price = yf.Ticker(ticker).fast_info.last_price
-                except Exception:
-                    pass
-
-            chart_path = generate_target_chart(ticker, c_price, t_price) if c_price else None
-            success    = broadcast_to_channel(formatted, channel["id"], image_path=chart_path)
-
-            if success:
-                cursor.execute(
-                    "UPDATE nightly_reports SET status = 'SENT' "
-                    "WHERE ticker = ? AND status = 'PENDING' AND lang = ?",
-                    (ticker, channel["lang"])
-                )
-            time.sleep(2)
-
-    conn.commit()
-    conn.close()
+    if CHANNEL_ID_EN:
+        broadcast_to_channel(msg_en, CHANNEL_ID_EN)
+    if CHANNEL_ID_IT:
+        broadcast_to_channel(msg_it, CHANNEL_ID_IT)
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +562,12 @@ def execute_nightly_routine():
     Completely index-agnostic — works on whatever get_us_market_universe() returns.
     Each pick is tagged with its universe_source and saved to the database.
     Earnings sniper and insider tracking remain restricted to sp500/nasdaq100.
+
+    Top Picks are recalculated from scratch every night with no cooldown —
+    a genuinely undervalued ticker should keep showing up for as long as it
+    remains a top candidate, rather than disappearing for a fixed window.
+    The only deduplication left is at the virtual-portfolio level: opening a
+    new position is skipped if one is already OPEN for that ticker.
     """
     logger.info("=" * 60)
     logger.info("Starting ValueLens Bilingual Nightly Screening Routine")
@@ -589,15 +578,7 @@ def execute_nightly_routine():
         logger.error("Universe is empty — aborting.")
         return
 
-    # Pre-filter universe — remove tickers alerted in the last 14 days.
-    # universe is a list of dicts {"ticker": str, "universe_source": str}.
-    pre_filtered = [
-        item for item in universe
-        if not was_recently_alerted(item["ticker"], cooldown_days=14)
-    ]
-    logger.info(f"Pre-filter: {len(universe)} → {len(pre_filtered)} tickers after 14-day cooldown.")
-
-    value_universe   = filter_value_universe(pre_filtered)
+    value_universe   = filter_value_universe(universe)
     fast_candidates  = fast_value_screen(value_universe)
     total_candidates = deep_value_screen(fast_candidates)
 
@@ -612,11 +593,6 @@ def execute_nightly_routine():
         info            = candidate.get("info") or {}
         c_price         = info.get("currentPrice") or info.get("regularMarketPrice")
         t_price         = info.get("targetMeanPrice")
-
-        # Deduplication: skip tickers alerted in the last 14 days
-        if was_recently_alerted(ticker, cooldown_days=14):
-            logger.info(f"Skipping {ticker} — alerted within cooldown window.")
-            continue
 
         nightly_winners.append(ticker)
 
@@ -636,10 +612,9 @@ def execute_nightly_routine():
         except Exception as e:
             logger.error(f"IT analysis failed for {ticker}: {e}")
 
-        # Mark ticker as alerted in unified deduplication table
-        record_alert_sent(ticker, alert_type="fundamental")
-
-        # Open virtual portfolio position for this pick
+        # Open virtual portfolio position for this pick.
+        # open_virtual_position() already no-ops if a position for this
+        # ticker is already OPEN, so re-appearing picks won't be re-bought.
         if c_price:
             open_virtual_position(ticker, entry_price=c_price, target_price=t_price)
 

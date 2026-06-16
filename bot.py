@@ -5,7 +5,7 @@ import datetime
 import requests
 from dotenv import load_dotenv
 
-from scanner import execute_nightly_routine, morning_broadcast
+from scanner import execute_nightly_routine
 from database import init_db, get_accuracy_metrics, evaluate_historical_accuracy_loop
 from earnings_engine import send_alert_to_channel, run_earnings_pipeline
 from weekly_engine import generate_and_broadcast_weekly_recap
@@ -178,9 +178,10 @@ async def core_scheduler_loop():
     # Ordered weekday steps: (hour, minute, log_label, async_factory)
     # Earnings sniper runs 3x/day (silent at 10:00 and 16:30 — DB only, no Telegram)
     # Insider tracking runs 2x/day (14:00 midday + 01:00 overnight)
-    # Only insider buy alerts go to Telegram — earnings updates go to dashboard only
+    # Telegram only carries: insider buy alerts, earnings sniper alerts above
+    # threshold, and virtual portfolio open/close events. Top Picks are
+    # website-only and recalculate fresh every night with no Telegram push.
     WEEKDAY_STEPS = [
-        (8,  0,  "08:00 AM — Morning Broadcast",               lambda: asyncio.to_thread(morning_broadcast)),
         (10, 0,  "10:00 AM — Earnings Sniper (silent)",        lambda: run_earnings_pipeline(silent=True)),
         (12, 30, "12:30 PM — Earnings Sniper",                 lambda: run_earnings_pipeline()),
         (14, 0,  "14:00 PM — Insider Tracking (midday)",       lambda: asyncio.to_thread(run_insider_tracking)),
