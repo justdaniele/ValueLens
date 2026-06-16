@@ -565,20 +565,43 @@ def insider_transactions(ticker):
 
 @app.route("/api/earnings")
 def earnings():
-    """Returns recent earnings sniper predictions with evaluation status."""
+    """Returns earnings sniper predictions, deduplicated to one row per ticker
+    (the most recent signal wins), split into two groups:
+
+      - upcoming: earnings_date is in the future (or unknown and not yet
+        evaluated by the 24h fallback timer)
+      - released: earnings_date has passed (or the 24h fallback fired),
+        limited to the last 14 days so the list doesn't grow unbounded
+
+    Response shape: {"upcoming": [...], "released": [...]}
+    """
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT ticker, price_at_signal, prediction, ees_score, is_evaluated, timestamp
+        SELECT ticker, price_at_signal, prediction, ees_score, is_evaluated,
+               timestamp, earnings_date
         FROM earnings_predictions
+        WHERE date(timestamp) >= date('now', '-14 days')
         ORDER BY timestamp DESC
-        LIMIT 30
     """)
     rows = cursor.fetchall()
     conn.close()
 
-    result = []
+    # Deduplicate — keep only the most recent row per ticker
+    # (rows are already ordered DESC by timestamp, so first occurrence wins)
+    seen = set()
+    deduped = []
     for r in rows:
+        if r["ticker"] in seen:
+            continue
+        seen.add(r["ticker"])
+        deduped.append(r)
+
+    now = datetime.datetime.now()
+    upcoming_list = []
+    released_list = []
+
+    for r in deduped:
         # Fetch current price for live change calculation
         curr_price = None
         try:
@@ -591,17 +614,35 @@ def earnings():
         if curr_price and signal_price > 0:
             change_pct = round(((curr_price - signal_price) / signal_price) * 100, 2)
 
-        result.append({
+        entry = {
             "ticker":        r["ticker"],
             "prediction":    r["prediction"],
             "ees_score":     r["ees_score"] or 0,
             "price_signal":  signal_price,
             "price_current": round(curr_price, 2) if curr_price else None,
             "change_pct":    change_pct,
-            "is_evaluated":  bool(r["is_evaluated"]),
             "timestamp":     r["timestamp"][:10] if r["timestamp"] else None,
-        })
-    return jsonify(result)
+            "earnings_date": r["earnings_date"][:10] if r["earnings_date"] else None,
+        }
+
+        # Determine Upcoming vs Released using the real earnings_date when available.
+        # Falls back to the is_evaluated flag (24h timer) for legacy rows without it.
+        is_released = False
+        if r["earnings_date"]:
+            try:
+                ed = datetime.datetime.fromisoformat(r["earnings_date"])
+                is_released = ed <= now
+            except ValueError:
+                is_released = bool(r["is_evaluated"])
+        else:
+            is_released = bool(r["is_evaluated"])
+
+        if is_released:
+            released_list.append(entry)
+        else:
+            upcoming_list.append(entry)
+
+    return jsonify({"upcoming": upcoming_list, "released": released_list})
 
 
 @app.route("/api/portfolio")
@@ -709,31 +750,6 @@ def portfolio():
     })
 
 
-
-@app.route("/api/weekly_earnings")
-def weekly_earnings():
-    """Returns earnings predictions from the last 14 days with EES scores."""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT ticker, price_at_signal, prediction, ees_score,
-               date(timestamp) as signal_date
-        FROM earnings_predictions
-        WHERE date(timestamp) >= date('now', '-14 days')
-        ORDER BY ees_score DESC
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        result.append({
-            "ticker":          r["ticker"],
-            "prediction":      r["prediction"],
-            "ees_score":       r["ees_score"] or 0,
-            "signal_date":     r["signal_date"],
-            "price_at_signal": r["price_at_signal"],
-        })
-    return jsonify(result)
 
 @app.route("/api/subscribe", methods=["POST"])
 def subscribe():
