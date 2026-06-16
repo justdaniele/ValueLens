@@ -152,6 +152,18 @@ nav {
 .hero-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
 .hero-divider { width: 1px; height: 30px; background: var(--border); }
 
+/* Hero market status — prominent, next to the portfolio stat */
+.hero-market-status {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-family: var(--mono); font-weight: 600;
+  padding: 5px 13px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--text-muted); margin-top: 6px;
+}
+.hero-market-status.is-open { border-color: var(--green-border); background: var(--green-bg); color: var(--green); }
+.hms-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+.hero-market-status.is-open .hms-dot { background: var(--green); animation: pulse 2s infinite; }
+
 /* ─── Section layout ─── */
 .section { padding: 48px 28px; border-bottom: 1px solid var(--border); }
 .section-inner { max-width: 1080px; margin: 0 auto; }
@@ -199,8 +211,9 @@ nav {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px 10px; border-bottom: 1px solid var(--border);
   background: linear-gradient(135deg, rgba(255,255,255,0.018) 0%, transparent 60%);
+  gap: 10px;
 }
-.pick-ticker-group { display: flex; align-items: center; gap: 8px; }
+.pick-ticker-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pick-avatar {
   width: 30px; height: 30px; border-radius: 7px;
   background: var(--bg-surface); border: 1px solid var(--border-hi);
@@ -210,6 +223,19 @@ nav {
 }
 .pick-sym { font-size: 14px; font-weight: 600; font-family: var(--mono); color: var(--text); }
 .pick-name { font-size: 10px; color: var(--text-muted); margin-top: 0; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Price block — fills the space between ticker and score ring */
+.pick-price-block { flex: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; min-width: 0; }
+.pick-price-main { display: flex; align-items: baseline; gap: 5px; }
+.pick-price-live {
+  font-size: 19px; font-weight: 700; font-family: var(--mono); color: var(--text);
+  transition: color 0.3s;
+}
+.pick-price-upside { font-size: 11px; font-weight: 600; font-family: var(--mono); color: var(--green); }
+.pick-price-upside.amber { color: var(--amber); }
+.pick-price-sub { font-size: 10px; color: var(--text-muted); font-family: var(--mono); display: flex; gap: 6px; align-items: center; }
+.pick-price-sub .sep { opacity: 0.4; }
+
 /* Score ring */
 .score-ring { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
 .score-ring svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); width: 40px; height: 40px; }
@@ -223,19 +249,30 @@ nav {
 .ring-green .score-ring svg { filter: drop-shadow(0 0 5px rgba(29,158,117,0.45)); }
 .ring-amber .score-ring svg { filter: drop-shadow(0 0 5px rgba(217,119,6,0.45)); }
 
-/* Compact metrics + upside — single row */
+/* Live price flash — stronger pulse so the 10s update catches the eye */
+@keyframes pricePulseGreen {
+  0%   { color: var(--text); transform: scale(1); }
+  30%  { color: #5DCAA5; transform: scale(1.08); }
+  100% { color: var(--text); transform: scale(1); }
+}
+@keyframes pricePulseRed {
+  0%   { color: var(--text); transform: scale(1); }
+  30%  { color: #F06060; transform: scale(1.08); }
+  100% { color: var(--text); transform: scale(1); }
+}
+.pick-price-live.flash-up   { animation: pricePulseGreen 0.8s ease; display: inline-block; }
+.pick-price-live.flash-down { animation: pricePulseRed   0.8s ease; display: inline-block; }
+
+/* Compact metrics row — target + P/E only (price/upside moved into header) */
 .pick-metrics-compact {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 14px; gap: 8px;
+  padding: 7px 14px; gap: 8px;
   border-bottom: 1px solid var(--border);
   font-size: 11px; font-family: var(--mono); flex-wrap: wrap;
 }
-.pmc-price { color: var(--text); }
-.pmc-arrow { color: var(--text-muted); margin: 0 3px; }
+.pmc-target-label { color: var(--text-muted); }
 .pmc-target { color: var(--green); font-weight: 600; }
-.pmc-pe { color: var(--text-muted); }
-.pmc-upside { font-weight: 600; color: var(--green); margin-left: auto; }
-.pmc-upside.amber { color: var(--amber); }
+.pmc-pe { color: var(--text-muted); margin-left: auto; }
 
 /* Mini indicator rows — compact single line each */
 .pick-indicators-compact { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
@@ -724,9 +761,15 @@ footer {
       <div class="hero-stat-label">golden combos</div>
     </div>
     <div class="hero-divider"></div>
-    <div class="hero-stat" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">
-      <div class="hero-stat-val" id="stat-portfolio" style="color:var(--green)">$100k</div>
-      <div class="hero-stat-label">virtual portfolio →</div>
+    <div class="hero-stat">
+      <div class="hero-stat-val" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">
+        <span style="color:var(--green)">$100k</span>
+      </div>
+      <div class="hero-stat-label" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">virtual portfolio →</div>
+      <div class="hero-market-status" id="hero-market-status">
+        <div class="hms-dot" id="hms-dot"></div>
+        <span id="hms-label">Market closed</span>
+      </div>
     </div>
   </div>
 </section>
@@ -961,17 +1004,26 @@ function isMarketOpen() {
 
 function updateMarketStatusBadge() {
   const open = isMarketOpen();
+
   const dot = document.getElementById('ms-dot');
   const lbl = document.getElementById('ms-label');
-  if (!dot || !lbl) return;
-  if (open) {
-    dot.className = 'ms-dot ms-open';
-    lbl.textContent = 'Market open';
-    lbl.style.color = 'var(--green)';
-  } else {
-    dot.className = 'ms-dot ms-closed';
-    lbl.textContent = 'Market closed';
-    lbl.style.color = 'var(--text-muted)';
+  if (dot && lbl) {
+    if (open) {
+      dot.className = 'ms-dot ms-open';
+      lbl.textContent = 'Market open';
+      lbl.style.color = 'var(--green)';
+    } else {
+      dot.className = 'ms-dot ms-closed';
+      lbl.textContent = 'Market closed';
+      lbl.style.color = 'var(--text-muted)';
+    }
+  }
+
+  const heroBadge = document.getElementById('hero-market-status');
+  const hmsLabel  = document.getElementById('hms-label');
+  if (heroBadge && hmsLabel) {
+    heroBadge.classList.toggle('is-open', open);
+    hmsLabel.textContent = open ? 'Market open' : 'Market closed';
   }
 }
 
@@ -1121,6 +1173,15 @@ function renderPicks(data) {
             <div class="pick-name">${getExchangeLabel(p.ticker)}</div>
           </div>
         </div>
+        <div class="pick-price-block">
+          <div class="pick-price-main">
+            <span class="pick-price-live" data-live-ticker="${p.ticker}">${p.price ? '$' + Number(p.price).toFixed(2) : '—'}</span>
+            <span class="pick-price-upside ${upPctClass}">${upsideRaw || '—'}</span>
+          </div>
+          <div class="pick-price-sub">
+            <span>Target $${p.target ? Number(p.target).toFixed(2) : '—'}</span>
+          </div>
+        </div>
         <div class="score-ring ${ringClass}" aria-label="AI score ${score} out of 100">
           <svg width="40" height="40" viewBox="0 0 40 40">
             <circle cx="20" cy="20" r="15" fill="none" stroke="${ringBg}" stroke-width="3"/>
@@ -1134,11 +1195,8 @@ function renderPicks(data) {
         </div>
       </div>
       <div class="pick-metrics-compact">
-        <span class="pmc-price" data-live-ticker="${p.ticker}">${p.price ? '$' + Number(p.price).toFixed(2) : '—'}</span>
-        <span class="pmc-arrow"><i class="ti ti-arrow-right"></i></span>
-        <span class="pmc-target">${p.target ? '$' + Number(p.target).toFixed(2) : '—'}</span>
-        <span class="pmc-pe">${p.pe ? Number(p.pe).toFixed(1) + 'x P/E' : ''}</span>
-        <span class="pmc-upside ${upPctClass}">${upsideRaw || '—'}</span>
+        <span class="pmc-target-label">P/E</span>
+        <span class="pmc-pe">${p.pe ? Number(p.pe).toFixed(1) + 'x' : '—'}</span>
       </div>
       <div class="pick-indicators-compact">
         <div class="mini-ind-row">
@@ -1459,11 +1517,11 @@ async function loadInsiders() {
     // Always fetch prices — last_price returns closing price even when market is closed
     await fetchInsiderLivePrices();
     renderInsiderTable();
-    // Refresh every 5 minutes during market hours
+    // Refresh every 10 seconds, same cadence as picks and portfolio
     setInterval(async () => {
       await fetchInsiderLivePrices();
       updateMarketStatusBadge();
-    }, 5 * 60 * 1000);
+    }, 10_000);
   } catch(e) {
     wrap.innerHTML = `<div class="error-state" style="margin:0;border-radius:0;"><i class="ti ti-alert-circle"></i> Could not load insider data. (${e.message})</div>`;
   }
@@ -1546,6 +1604,7 @@ function renderInsiderTable() {
       <td><span class="it-badge it-buy">BUY</span></td>
       <td><span class="it-val">${valueStr}</span></td>
       <td><span class="it-price">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
+      <td><span class="it-price" data-live-ticker="${r.ticker}">${livePrice ? '$' + livePrice.toFixed(2) : '—'}</span></td>
       <td>${changeCell}</td>
       <td><span class="it-date">${r.date_detected || '—'}</span></td>
     </tr>`;
@@ -1553,7 +1612,7 @@ function renderInsiderTable() {
     // Detail row — loaded on-demand when user clicks to expand
     if (hasDetail) {
       tbody += `<tr class="insider-detail-row" id="insider-detail-${idx}">
-        <td class="insider-detail-cell" colspan="6">
+        <td class="insider-detail-cell" colspan="7">
           <div class="insider-detail-inner"></div>
         </td>
       </tr>`;
@@ -1568,6 +1627,7 @@ function renderInsiderTable() {
           <th>Type</th>
           <th>Insider Value</th>
           <th>Price at Signal</th>
+          <th>Current Price</th>
           <th>Change Since Signal</th>
           <th>Detected</th>
         </tr>
@@ -1693,9 +1753,12 @@ async function fetchLivePrices() {
         const direction = info.price > prev.price ? 'up' : 'down';
         document.querySelectorAll(`[data-live-ticker="${ticker}"]`).forEach(el => {
           el.textContent = '$' + info.price.toFixed(2);
-          el.classList.remove('price-flash-up', 'price-flash-down');
+          el.classList.remove('price-flash-up', 'price-flash-down', 'flash-up', 'flash-down');
           void el.offsetWidth; // Force reflow
-          el.classList.add(direction === 'up' ? 'price-flash-up' : 'price-flash-down');
+          const isPickPrice = el.classList.contains('pick-price-live');
+          const upClass   = isPickPrice ? 'flash-up'   : 'price-flash-up';
+          const downClass = isPickPrice ? 'flash-down' : 'price-flash-down';
+          el.classList.add(direction === 'up' ? upClass : downClass);
         });
         // Update change % elements
         document.querySelectorAll(`[data-live-change="${ticker}"]`).forEach(el => {
