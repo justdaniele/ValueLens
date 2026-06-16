@@ -349,9 +349,27 @@ function renderPortfolio(data) {
 
 loadPortfolio();
 
-// Refresh every 10 seconds so P&L, current prices, and progress bars
-// stay live without requiring a manual page reload.
-setInterval(loadPortfolio, 10_000);
+// Market hours check (NYSE: 09:30–16:00 ET, Mon–Fri) — mirrors index.html.
+// portfolio.html is a separate page with its own script scope, so this is
+// duplicated locally rather than shared.
+function isMarketOpen() {
+  const now = new Date();
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay();
+  const h = et.getHours();
+  const m = et.getMinutes();
+  const minutes = h * 60 + m;
+  if (day === 0 || day === 6) return false;
+  return minutes >= 570 && minutes < 960;
+}
+
+// Refresh every 10 seconds, but only while the market is open — prices
+// (and therefore P&L, the allocation pie, and progress bars) cannot change
+// while it's closed, so re-rendering on a timer just flickers the chart
+// for no reason.
+setInterval(() => {
+  if (isMarketOpen()) loadPortfolio();
+}, 10_000);
 
 </script>
 </body>

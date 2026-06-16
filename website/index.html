@@ -223,6 +223,7 @@ nav {
 }
 .pick-sym { font-size: 14px; font-weight: 600; font-family: var(--mono); color: var(--text); }
 .pick-name { font-size: 10px; color: var(--text-muted); margin-top: 0; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-header-divider { width: 1px; align-self: stretch; background: var(--border); flex-shrink: 0; }
 
 /* Price block — fills the space between ticker and score ring */
 .pick-price-block { flex: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; min-width: 0; }
@@ -233,8 +234,9 @@ nav {
 }
 .pick-price-upside { font-size: 11px; font-weight: 600; font-family: var(--mono); color: var(--green); }
 .pick-price-upside.amber { color: var(--amber); }
-.pick-price-sub { font-size: 10px; color: var(--text-muted); font-family: var(--mono); display: flex; gap: 6px; align-items: center; }
+.pick-price-sub { font-size: 12px; color: var(--text-muted); font-family: var(--mono); display: flex; gap: 6px; align-items: center; font-weight: 500; }
 .pick-price-sub .sep { opacity: 0.4; }
+.pick-price-sub .target-val { color: var(--green-light); }
 
 /* Score ring */
 .score-ring { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
@@ -263,16 +265,7 @@ nav {
 .pick-price-live.flash-up   { animation: pricePulseGreen 0.8s ease; display: inline-block; }
 .pick-price-live.flash-down { animation: pricePulseRed   0.8s ease; display: inline-block; }
 
-/* Compact metrics row — target + P/E only (price/upside moved into header) */
-.pick-metrics-compact {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 14px; gap: 8px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px; font-family: var(--mono); flex-wrap: wrap;
-}
-.pmc-target-label { color: var(--text-muted); }
-.pmc-target { color: var(--green); font-weight: 600; }
-.pmc-pe { color: var(--text-muted); margin-left: auto; }
+/* Header subtitle line carries Target + P/E now — no separate metrics row */
 
 /* Mini indicator rows — compact single line each */
 .pick-indicators-compact { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
@@ -1173,13 +1166,16 @@ function renderPicks(data) {
             <div class="pick-name">${getExchangeLabel(p.ticker)}</div>
           </div>
         </div>
+        <div class="pick-header-divider"></div>
         <div class="pick-price-block">
           <div class="pick-price-main">
             <span class="pick-price-live" data-live-ticker="${p.ticker}">${p.price ? '$' + Number(p.price).toFixed(2) : '—'}</span>
             <span class="pick-price-upside ${upPctClass}">${upsideRaw || '—'}</span>
           </div>
           <div class="pick-price-sub">
-            <span>Target $${p.target ? Number(p.target).toFixed(2) : '—'}</span>
+            <span>Target <span class="target-val">$${p.target ? Number(p.target).toFixed(2) : '—'}</span></span>
+            <span class="sep">·</span>
+            <span>${p.pe ? Number(p.pe).toFixed(1) + 'x P/E' : '—'}</span>
           </div>
         </div>
         <div class="score-ring ${ringClass}" aria-label="AI score ${score} out of 100">
@@ -1193,10 +1189,6 @@ function renderPicks(data) {
           </svg>
           <div class="score-ring-val" id="rscore-${i}">0</div>
         </div>
-      </div>
-      <div class="pick-metrics-compact">
-        <span class="pmc-target-label">P/E</span>
-        <span class="pmc-pe">${p.pe ? Number(p.pe).toFixed(1) + 'x' : '—'}</span>
       </div>
       <div class="pick-indicators-compact">
         <div class="mini-ind-row">
