@@ -405,37 +405,106 @@ def price_history(ticker: str):
 
 
 # ─────────────────────────────────────────────
-# /api/live_prices — current prices for insider % change column
+# /api/live_prices — current prices, dual mode
 # ─────────────────────────────────────────────
+
+# Small in-memory cache so a 10s frontend poll doesn't hammer yfinance when
+# multiple browser tabs/users are open at once. Keyed by ticker, values are
+# {"price": float, "change": float, "ts": epoch_seconds}.
+_live_price_cache: dict = {}
+_LIVE_PRICE_TTL_SECS = 8  # slightly under the 10s frontend poll interval
+
+
+def _fetch_live_quote(ticker: str):
+    """Fetches a single ticker's price + % change via yfinance fast_info.
+    Returns None on failure. Uses fast_info exclusively — no direct Yahoo
+    HTTP calls, which get rate-limited/blocked without a browser session.
+    """
+    try:
+        info = yf.Ticker(ticker).fast_info
+        price = getattr(info, "last_price", None) or getattr(info, "lastPrice", None)
+        prev_close = getattr(info, "previous_close", None) or getattr(info, "previousClose", None)
+        if not price:
+            return None
+        change = None
+        if prev_close and prev_close > 0:
+            change = round(((price - prev_close) / prev_close) * 100, 2)
+        return {"price": round(float(price), 2), "change": change if change is not None else 0.0}
+    except Exception as e:
+        logger.debug(f"live_prices: could not fetch {ticker}: {e}")
+        return None
+
+
+def _get_live_quotes(tickers: list) -> dict:
+    """Returns {ticker: {price, change}} for the given tickers, using the
+    short-lived in-memory cache to avoid refetching within _LIVE_PRICE_TTL_SECS.
+    """
+    now = _time.time()
+    result = {}
+    to_fetch = []
+
+    for t in tickers:
+        cached = _live_price_cache.get(t)
+        if cached and (now - cached["ts"]) < _LIVE_PRICE_TTL_SECS:
+            result[t] = {"price": cached["price"], "change": cached["change"]}
+        else:
+            to_fetch.append(t)
+
+    for t in to_fetch:
+        quote = _fetch_live_quote(t)
+        if quote:
+            result[t] = quote
+            _live_price_cache[t] = {**quote, "ts": now}
+
+    return result
+
 
 @app.route("/api/live_prices")
 def live_prices():
     """
-    Returns the latest price for a comma-separated list of tickers.
-    Called by the frontend only during NYSE market hours (09:30–16:00 ET).
-    Uses yfinance fast_info to minimise API load — one call per ticker.
+    Dual-mode live price endpoint.
 
-    Example: /api/live_prices?tickers=AAPL,MSFT,NVDA
-    Returns: { "AAPL": 213.40, "MSFT": 441.20, "NVDA": 128.50 }
+    EXPLICIT MODE — called with ?tickers=AAPL,MSFT (used by the insider
+    table and anywhere a fixed ticker list is known ahead of time):
+    returns {ticker: {price, change}}.
+
+    AUTO MODE — called with no params (used by the dashboard-wide 10s
+    poller covering hero stats, pick cards, and the virtual portfolio):
+    auto-detects every ticker currently relevant — last night's picks,
+    active insider signals, and open virtual portfolio positions — and
+    returns the same {ticker: {price, change}} shape for all of them.
+
+    Both modes share the same short-lived cache, so overlapping requests
+    (e.g. picks + portfolio both wanting AAPL) only hit yfinance once.
     """
     tickers_param = request.args.get("tickers", "")
-    if not tickers_param:
-        return jsonify({}), 400
 
-    tickers = [t.strip().upper() for t in tickers_param.split(",") if t.strip()]
-    # Hard limit — never fetch more than 20 at once to protect the Pi
-    tickers = tickers[:20]
+    if tickers_param:
+        tickers = [t.strip().upper() for t in tickers_param.split(",") if t.strip()][:30]
+        return jsonify(_get_live_quotes(tickers))
 
-    result = {}
-    for ticker in tickers:
-        try:
-            price = yf.Ticker(ticker).fast_info.last_price
-            if price:
-                result[ticker] = round(float(price), 2)
-        except Exception as e:
-            logger.debug(f"live_prices: could not fetch {ticker}: {e}")
+    conn = get_db()
+    cursor = conn.cursor()
 
-    return jsonify(result)
+    cursor.execute("""
+        SELECT DISTINCT ticker FROM nightly_reports
+        WHERE date(date_generated) = (SELECT date(MAX(date_generated)) FROM nightly_reports)
+    """)
+    pick_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    cursor.execute("SELECT DISTINCT ticker FROM insider_signals WHERE status = 'ACTIVE'")
+    insider_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    cursor.execute("SELECT DISTINCT ticker FROM virtual_positions WHERE status = 'OPEN'")
+    portfolio_tickers = [r["ticker"] for r in cursor.fetchall()]
+
+    conn.close()
+
+    all_tickers = list(set(pick_tickers + insider_tickers + portfolio_tickers))
+    if not all_tickers:
+        return jsonify({})
+
+    return jsonify(_get_live_quotes(all_tickers))
 
 
 # ─────────────────────────────────────────────
@@ -677,12 +746,14 @@ def portfolio():
     total_invested = 0.0
     total_unrealized_pnl = 0.0
 
+    # Fetch all open-position prices in one batch via the shared short-lived
+    # cache — avoids hammering yfinance on every 10s portfolio page poll.
+    open_tickers = [r["ticker"] for r in open_rows]
+    live_quotes  = _get_live_quotes(open_tickers) if open_tickers else {}
+
     for r in open_rows:
-        curr_price = None
-        try:
-            curr_price = yf.Ticker(r["ticker"]).fast_info.last_price
-        except Exception:
-            pass
+        quote = live_quotes.get(r["ticker"])
+        curr_price = quote["price"] if quote else None
 
         entry   = r["entry_price"]
         shares  = r["shares"]

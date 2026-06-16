@@ -348,6 +348,11 @@ function renderPortfolio(data) {
 }
 
 loadPortfolio();
+
+// Refresh every 10 seconds so P&L, current prices, and progress bars
+// stay live without requiring a manual page reload.
+setInterval(loadPortfolio, 10_000);
+
 </script>
 </body>
 </html>

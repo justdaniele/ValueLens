@@ -1522,7 +1522,8 @@ function renderInsiderTable() {
 
   insiderData.forEach((r, idx) => {
     const signalPrice = parseFloat(r.price_detected);
-    const livePrice   = insiderLivePrices[r.ticker];
+    const liveQuote   = insiderLivePrices[r.ticker];
+    const livePrice   = liveQuote ? liveQuote.price : null;
 
     let changeCell = '<span class="it-chg-neu">—</span>';
     if (livePrice && signalPrice > 0) {
@@ -1544,7 +1545,7 @@ function renderInsiderTable() {
       </td>
       <td><span class="it-badge it-buy">BUY</span></td>
       <td><span class="it-val">${valueStr}</span></td>
-      <td><span class="it-price" data-live-ticker="${r.ticker}">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
+      <td><span class="it-price">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
       <td>${changeCell}</td>
       <td><span class="it-date">${r.date_detected || '—'}</span></td>
     </tr>`;
