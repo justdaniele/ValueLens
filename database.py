@@ -120,6 +120,7 @@ def init_db():
         "ALTER TABLE insider_signals ADD COLUMN num_transactions INTEGER DEFAULT 0",
         "ALTER TABLE earnings_predictions ADD COLUMN ees_score INTEGER DEFAULT 0",
         "ALTER TABLE nightly_reports ADD COLUMN universe_source TEXT DEFAULT 'sp500'",
+        "ALTER TABLE earnings_predictions ADD COLUMN earnings_date DATETIME DEFAULT NULL",
     ]
     for migration in migrations:
         try:
@@ -153,14 +154,24 @@ def save_report_to_db(ticker, report_text, lang="en", current_price=None, target
     conn.close()
 
 
-def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0):
-    """Saves a dynamic earnings sniper prediction to the database."""
+def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0, earnings_date=None):
+    """Saves a dynamic earnings sniper prediction to the database.
+
+    Args:
+        ticker: Stock ticker symbol.
+        price_at_signal: Price at the time the prediction was generated.
+        prediction: 'BULLISH' or 'BEARISH'.
+        ees_score: Combined quant + AI sentiment score.
+        earnings_date: The real upcoming earnings datetime (ISO string), used to
+            determine when the prediction moves from Upcoming to Released.
+            If None, the released status falls back to the 24h evaluation timer.
+    """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score)
-        VALUES (?, ?, ?, ?)
-    """, (ticker, price_at_signal, prediction, ees_score))
+        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score, earnings_date)
+        VALUES (?, ?, ?, ?, ?)
+    """, (ticker, price_at_signal, prediction, ees_score, earnings_date))
     conn.commit()
     conn.close()
 
@@ -218,14 +229,22 @@ def get_weekly_summary_stats():
 
 
 def evaluate_historical_accuracy_loop():
-    """Evaluates pending earnings predictions against current market price data to calculate true win/loss metrics."""
+    """Evaluates pending earnings predictions against current market price data to calculate true win/loss metrics.
+
+    A prediction is only evaluated once its real earnings_date has passed.
+    If earnings_date is missing (legacy rows or lookup failure at signal time),
+    falls back to the previous 24h-after-signal heuristic so old rows still progress.
+    """
     logger.info("Starting historical accuracy validation sweep...")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
+
     cursor.execute(
         "SELECT id, ticker, price_at_signal, prediction FROM earnings_predictions "
-        "WHERE is_evaluated = 0 AND timestamp <= datetime('now', '-24 hours')"
+        "WHERE is_evaluated = 0 AND ("
+        "   (earnings_date IS NOT NULL AND earnings_date <= datetime('now'))"
+        "   OR (earnings_date IS NULL AND timestamp <= datetime('now', '-24 hours'))"
+        ")"
     )
     pending = cursor.fetchall()
     

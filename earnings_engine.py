@@ -38,7 +38,13 @@ def send_alert_to_channel(text_en: str, text_it: str = None):
         dispatch(CHANNEL_ID_IT, text_it if text_it else text_en)
 
 def _get_earnings_in_window(universe: list, lookahead_hours: int = 48) -> list:
-    """Scans the universe and returns tickers with earnings in the lookahead window."""
+    """Scans the universe and returns tickers with earnings in the lookahead window.
+
+    Returns a list of dicts: {"ticker": str, "earnings_date": datetime}.
+    earnings_date is the real upcoming earnings datetime sourced from
+    yfinance (calendar or earningsTimestamp), used downstream to know
+    precisely when a prediction should move from Upcoming to Released.
+    """
     upcoming = []
     cutoff = datetime.datetime.now() + datetime.timedelta(hours=lookahead_hours)
 
@@ -75,7 +81,7 @@ def _get_earnings_in_window(universe: list, lookahead_hours: int = 48) -> list:
 
             if earnings_dt:
                 logger.info(f"Earnings detected for {ticker} at {earnings_dt}")
-                upcoming.append(ticker)
+                upcoming.append({"ticker": ticker, "earnings_date": earnings_dt})
 
         except Exception as e:
             logger.debug(f"Calendar lookup failed for {ticker}: {e}")
@@ -156,7 +162,9 @@ async def run_earnings_pipeline(silent: bool = False):
         logger.info("No earnings events detected in the next 48h. Sniper standing by.")
         return
 
-    for ticker in upcoming:
+    for item in upcoming:
+        ticker        = item["ticker"]
+        earnings_date = item.get("earnings_date")
         try:
             stock = yf.Ticker(ticker)
             curr_price = stock.fast_info.last_price
@@ -169,7 +177,8 @@ async def run_earnings_pipeline(silent: bool = False):
             direction    = "BULLISH" if final_ees >= 0 else "BEARISH"
             direction_it = "RIALZISTA" if final_ees >= 0 else "RIBASSISTA"
 
-            save_earnings_prediction(ticker, curr_price, direction, ees_score=final_ees)
+            earnings_date_str = earnings_date.isoformat() if earnings_date else None
+            save_earnings_prediction(ticker, curr_price, direction, ees_score=final_ees, earnings_date=earnings_date_str)
 
             if abs(final_ees) >= EES_FIRE_THRESHOLD:
                 msg_en = (f"🎯 <b>Sniper Alert: {ticker}</b>\n\n"

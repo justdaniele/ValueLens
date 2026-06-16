@@ -586,6 +586,28 @@ nav {
 .universe-tab.active .universe-tab-count {
   background: var(--green-bg); color: var(--green);
 }
+.earnings-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.earnings-tab {
+  font-size: 12px; font-weight: 600; font-family: var(--mono);
+  padding: 5px 14px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); transition: all 0.15s; white-space: nowrap;
+}
+.earnings-tab:hover { border-color: var(--border-hi); color: var(--text); }
+.earnings-tab.active {
+  background: rgba(139,92,246,0.1); border-color: rgba(139,92,246,0.3);
+  color: #8B5CF6;
+}
+.earnings-tab-count {
+  display: inline-block; margin-left: 5px;
+  background: rgba(255,255,255,0.07); border-radius: 10px;
+  padding: 0 6px; font-size: 10px; color: var(--text-muted);
+}
+.earnings-tab.active .earnings-tab-count {
+  background: rgba(139,92,246,0.15); color: #8B5CF6;
+}
 
 /* ─── Footer ─── */
 footer {
@@ -741,6 +763,14 @@ footer {
     </div>
     <span class="insider-count-badge" id="earnings-count">loading...</span>
   </div>
+  <div class="earnings-tabs" id="earnings-tabs">
+    <button class="earnings-tab active" data-status="upcoming" onclick="switchEarningsTab('upcoming')">
+      Upcoming <span class="earnings-tab-count" id="etab-count-upcoming">—</span>
+    </button>
+    <button class="earnings-tab" data-status="released" onclick="switchEarningsTab('released')">
+      Released <span class="earnings-tab-count" id="etab-count-released">—</span>
+    </button>
+  </div>
   <div id="earnings-wrap"></div>
 </div>
 
@@ -765,25 +795,6 @@ footer {
     </div>
     <div id="insiders-wrap" class="insider-wrap">
       <div class="loading-state" style="padding:24px;"><div class="spinner"></div> Scanning insider filings...</div>
-    </div>
-  </div>
-</section>
-
-<!-- Weekly Earnings Calendar -->
-<section class="section" id="weekly-earnings">
-  <div class="section-inner">
-    <div class="section-header">
-      <div class="section-title-group">
-        <div class="section-icon si-blue"><i class="ti ti-calendar-event"></i></div>
-        <div>
-          <div class="section-title">This Week's Earnings</div>
-          <div class="section-sub">AI directional predictions for earnings events this week</div>
-        </div>
-      </div>
-      <span class="badge-count" id="weekly-earnings-count">—</span>
-    </div>
-    <div id="weekly-earnings-body">
-      <div class="loading-state"><div class="spinner"></div> Loading...</div>
     </div>
   </div>
 </section>
@@ -958,7 +969,7 @@ async function fetchJSON(endpoint) {
 // ─── Load all sections ───
 async function loadAll() {
   updateMarketStatusBadge();
-  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos(), loadWeeklyEarnings()]);
+  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos()]);
   // Start live price updates every 10 seconds during market hours
   startLivePriceUpdates();
 }
@@ -1327,66 +1338,99 @@ function toggleChart(i, ticker) {
 
 
 // ─── Earnings Sniper ───
+let earningsGrouped = {upcoming: [], released: []};
+let activeEarningsTab = "upcoming";
+
 async function loadEarnings() {
   const wrap  = document.getElementById('earnings-wrap');
   const badge = document.getElementById('earnings-count');
   if (!wrap) return;
   try {
     const data = await fetchJSON('/api/earnings');
-    if (badge) badge.textContent = data.length + ' predictions';
-    if (!data.length) {
-      wrap.innerHTML = '<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">No earnings predictions yet — the sniper runs daily at 12:30 PM.</div>';
-      return;
-    }
-    const rows = data.map(r => {
-      const isBull  = r.prediction === 'BULLISH';
-      const ees     = r.ees_score || 0;
-      const absPct  = Math.min(Math.abs(ees) / 70 * 50, 50); // max 50% of track
-      const numCls  = ees > 0 ? 'ees-score-pos' : ees < 0 ? 'ees-score-neg' : 'ees-score-neu';
-      const sign    = ees > 0 ? '+' : '';
-      const fillBar = ees >= 0
-        ? `<div class="ees-fill-pos" style="width:${absPct}%"></div>`
-        : `<div class="ees-fill-neg" style="width:${absPct}%"></div>`;
-      const predBadge = `<div class="ees-bar-wrap">
-        <span class="ees-label-bear">BEAR</span>
-        <div class="ees-track">${fillBar}</div>
-        <span class="ees-label-bull">BULL</span>
-        <span class="ees-score-num ${numCls}">${sign}${ees}</span>
-      </div>`;
+    // data shape: {upcoming: [...], released: [...]}
+    earningsGrouped = data;
+    const total = (data.upcoming || []).length + (data.released || []).length;
+    if (badge) badge.textContent = total + ' predictions';
 
-      let chgCell = '<span class="earn-chg-neu">—</span>';
-      if (r.change_pct !== null && r.change_pct !== undefined) {
-        const sign = r.change_pct >= 0 ? '+' : '';
-        const cls  = r.change_pct >= 0 ? 'earn-chg-pos' : 'earn-chg-neg';
-        chgCell = '<span class="' + cls + '">' + sign + r.change_pct.toFixed(2) + '%</span>';
-      }
+    const upCountEl = document.getElementById('etab-count-upcoming');
+    const relCountEl = document.getElementById('etab-count-released');
+    if (upCountEl) upCountEl.textContent = (data.upcoming || []).length;
+    if (relCountEl) relCountEl.textContent = (data.released || []).length;
 
-      const evalBadge = r.is_evaluated
-        ? '<span class="earn-evaluated earn-eval-yes">&#10003; Evaluated</span>'
-        : '<span class="earn-evaluated earn-eval-no">Pending</span>';
-
-      return '<tr>' +
-        '<td><span class="earn-ticker">' + r.ticker + '</span></td>' +
-        '<td>' + predBadge + '</td>' +
-        '<td><span class="earn-price">$' + Number(r.price_signal || 0).toFixed(2) + '</span></td>' +
-        '<td><span class="earn-price">' + (r.price_current ? '$' + r.price_current.toFixed(2) : '—') + '</span></td>' +
-        '<td>' + chgCell + '</td>' +
-        '<td>' + evalBadge + '</td>' +
-        '<td><span class="earn-date">' + (r.timestamp || '—') + '</span></td>' +
-        '</tr>';
-    }).join('');
-
-    wrap.innerHTML =
-      '<table class="earnings-table">' +
-      '<thead><tr>' +
-      '<th>Ticker</th><th>EES Signal</th><th>Price at Signal</th>' +
-      '<th>Current Price</th><th>Change</th><th>Status</th><th>Date</th>' +
-      '</tr></thead>' +
-      '<tbody>' + rows + '</tbody>' +
-      '</table>';
+    renderEarningsTable(earningsGrouped[activeEarningsTab] || []);
   } catch(e) {
     if (wrap) wrap.innerHTML = '<div style="padding:24px;color:var(--text-muted);font-size:13px">Could not load earnings data.</div>';
   }
+}
+
+function switchEarningsTab(status) {
+  activeEarningsTab = status;
+  document.querySelectorAll('.earnings-tab').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-status') === status);
+  });
+  renderEarningsTable(earningsGrouped[status] || []);
+}
+
+function renderEarningsTable(data) {
+  const wrap = document.getElementById('earnings-wrap');
+  if (!wrap) return;
+
+  if (!data.length) {
+    const emptyMsg = activeEarningsTab === 'upcoming'
+      ? 'No upcoming earnings detected — the sniper runs daily at 12:30 PM.'
+      : 'No released earnings in the last 14 days.';
+    wrap.innerHTML = '<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">' + emptyMsg + '</div>';
+    return;
+  }
+
+  const rows = data.map(r => {
+    const isBull  = r.prediction === 'BULLISH';
+    const ees     = r.ees_score || 0;
+    const absPct  = Math.min(Math.abs(ees) / 70 * 50, 50); // max 50% of track
+    const numCls  = ees > 0 ? 'ees-score-pos' : ees < 0 ? 'ees-score-neg' : 'ees-score-neu';
+    const sign    = ees > 0 ? '+' : '';
+    const fillBar = ees >= 0
+      ? `<div class="ees-fill-pos" style="width:${absPct}%"></div>`
+      : `<div class="ees-fill-neg" style="width:${absPct}%"></div>`;
+    const predBadge = `<div class="ees-bar-wrap">
+      <span class="ees-label-bear">BEAR</span>
+      <div class="ees-track">${fillBar}</div>
+      <span class="ees-label-bull">BULL</span>
+      <span class="ees-score-num ${numCls}">${sign}${ees}</span>
+    </div>`;
+
+    let chgCell = '<span class="earn-chg-neu">—</span>';
+    if (r.change_pct !== null && r.change_pct !== undefined) {
+      const csign = r.change_pct >= 0 ? '+' : '';
+      const cls   = r.change_pct >= 0 ? 'earn-chg-pos' : 'earn-chg-neg';
+      chgCell = '<span class="' + cls + '">' + csign + r.change_pct.toFixed(2) + '%</span>';
+    }
+
+    const statusBadge = activeEarningsTab === 'released'
+      ? '<span class="earn-evaluated earn-eval-yes">&#10003; Released</span>'
+      : '<span class="earn-evaluated earn-eval-no">Upcoming</span>';
+
+    const dateCell = r.earnings_date || r.timestamp || '—';
+
+    return '<tr>' +
+      '<td><span class="earn-ticker">' + r.ticker + '</span></td>' +
+      '<td>' + predBadge + '</td>' +
+      '<td><span class="earn-price">$' + Number(r.price_signal || 0).toFixed(2) + '</span></td>' +
+      '<td><span class="earn-price">' + (r.price_current ? '$' + r.price_current.toFixed(2) : '—') + '</span></td>' +
+      '<td>' + chgCell + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td><span class="earn-date">' + dateCell + '</span></td>' +
+      '</tr>';
+  }).join('');
+
+  wrap.innerHTML =
+    '<table class="earnings-table">' +
+    '<thead><tr>' +
+    '<th>Ticker</th><th>EES Signal</th><th>Price at Signal</th>' +
+    '<th>Current Price</th><th>Change</th><th>Status</th><th>Earnings Date</th>' +
+    '</tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+    '</table>';
 }
 
 async function loadInsiders() {
@@ -1673,48 +1717,6 @@ function startLivePriceUpdates() {
   }, 10_000); // Every 10 seconds
 }
 
-</script>
-<script>
-async function loadWeeklyEarnings() {
-  try {
-    const data = await fetchJSON('/api/weekly_earnings');
-    const badge = document.getElementById('weekly-earnings-count');
-    const body  = document.getElementById('weekly-earnings-body');
-    if (badge) badge.textContent = data.length + ' events';
-    if (!data.length) {
-      if (body) body.innerHTML = '<div class="empty-state">No earnings events in the last 14 days.</div>';
-      return;
-    }
-    const rows = data.map(e => {
-      const isBull = e.prediction === 'BULLISH';
-      const ees = e.ees_score || 0;
-      const barW = Math.min(100, Math.abs(ees) / 70 * 100).toFixed(0);
-      const barCol = isBull ? 'var(--green)' : 'var(--red)';
-      const sign = ees >= 0 ? '+' : '';
-      return `<tr>
-        <td><span class="we-ticker">${e.ticker}</span></td>
-        <td><span class="${isBull ? 'we-bull' : 'we-bear'}">${isBull ? '▲ BULLISH' : '▼ BEARISH'}</span></td>
-        <td>
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:80px;height:4px;background:rgba(255,255,255,.06);border-radius:99px">
-              <div style="width:${barW}%;height:100%;background:${barCol};border-radius:99px"></div>
-            </div>
-            <span style="font-family:var(--mono);font-size:11px;color:${barCol}">${sign}${ees}/70</span>
-          </div>
-        </td>
-        <td><span class="we-date">${e.signal_date || '—'}</span></td>
-        <td><span style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${e.price_at_signal ? '$'+Number(e.price_at_signal).toFixed(2) : '—'}</span></td>
-      </tr>`;
-    }).join('');
-    if (body) body.innerHTML = `<table class="we-table">
-      <thead><tr><th>Ticker</th><th>Prediction</th><th>EES Signal</th><th>Date</th><th>Price at Signal</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  } catch(e) {
-    const body = document.getElementById('weekly-earnings-body');
-    if (body) body.innerHTML = '<div class="empty-state">No data available.</div>';
-  }
-}
 </script>
 <script>
 if ('serviceWorker' in navigator) {
