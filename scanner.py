@@ -70,17 +70,19 @@ def get_sp400_tickers() -> list:
     return _get_tickers_cached(
         cache_file="sp400_tickers.txt",
         url="https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
-        symbol_col="Ticker",
+        symbol_col=["Symbol", "Ticker"],
         label="S&P 400"
     )
 
 
 def get_russell1000_tickers() -> list:
-    """Returns the top 1000 Russell 2000 tickers by market cap.
+    """Returns the current Russell 1000 Index constituents.
 
-    Fetches the full Russell 2000 list from Wikipedia, then sorts by market cap
-    using yfinance fast_info and returns the top 1000. Results are cached for 7 days.
-    Falls back to the raw Wikipedia list (up to 1000) if market cap fetch fails.
+    Sourced from the official iShares Russell 1000 ETF (IWB) holdings CSV,
+    which BlackRock publishes daily and tracks the index almost exactly
+    (~1000 holdings). This is the only free, reliable, and complete source —
+    Wikipedia does not maintain a full Russell 1000/2000 constituent list.
+    Results are cached locally for 7 days.
     """
     cache_file = "russell1000_tickers.txt"
     cache_expiry_days = 7
@@ -92,68 +94,73 @@ def get_russell1000_tickers() -> list:
             with open(cache_file, "r") as f:
                 return [line.strip() for line in f if line.strip()]
 
-    logger.info("Cache missing or expired. Building Russell 1000 by market cap from Wikipedia Russell 2000...")
+    logger.info("Cache missing or expired. Downloading Russell 1000 constituents from iShares IWB holdings CSV...")
     try:
-        headers  = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(
-            "https://en.wikipedia.org/wiki/Russell_2000_Index",
-            headers=headers, timeout=15
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        url = (
+            "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/"
+            "1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund"
         )
+        response = requests.get(url, headers=headers, timeout=20)
         response.raise_for_status()
 
-        tables = pd.read_html(response.text)
-        raw_tickers = None
-        for table in tables:
-            for col in ("Ticker", "Symbol", "ticker", "symbol"):
-                if col in table.columns:
-                    raw_tickers = [t.replace(".", "-") for t in table[col].dropna().tolist()]
-                    break
-            if raw_tickers:
+        # The iShares CSV has a few metadata rows before the actual holdings table.
+        # We find the header row dynamically by locating the line starting with "Ticker".
+        lines = response.text.splitlines()
+        header_idx = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith("Ticker"):
+                header_idx = i
                 break
 
-        if not raw_tickers:
-            raise ValueError("No ticker column found in Russell 2000 Wikipedia tables.")
+        if header_idx is None:
+            raise ValueError("Could not locate holdings header row in iShares CSV.")
 
-        logger.info(f"Fetched {len(raw_tickers)} raw Russell 2000 tickers. Sorting top 1000 by market cap...")
+        from io import StringIO
+        csv_body = "\n".join(lines[header_idx:])
+        df = pd.read_csv(StringIO(csv_body))
 
-        scored = []
-        for ticker in raw_tickers:
-            try:
-                mcap = yf.Ticker(ticker).fast_info.market_cap
-                if mcap and mcap > 0:
-                    scored.append((ticker, mcap))
-            except Exception:
-                pass
-            time.sleep(0.05)
+        if "Ticker" not in df.columns:
+            raise ValueError("Ticker column not found in iShares holdings CSV.")
 
-        # Sort descending by market cap and take top 1000
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top1000 = [t for t, _ in scored[:1000]]
+        # Drop cash/derivative rows (blank ticker or non-equity asset class)
+        df = df[df["Ticker"].notna()]
+        if "Asset Class" in df.columns:
+            df = df[df["Asset Class"].astype(str).str.contains("Equity", case=False, na=False)]
 
-        # Fallback: if market cap fetch retrieved fewer than 200 valid results, use raw list
-        if len(top1000) < 200:
-            logger.warning("Market cap sort yielded too few results — falling back to raw Wikipedia list (top 1000).")
-            top1000 = raw_tickers[:1000]
+        tickers = [str(t).strip().replace(".", "-") for t in df["Ticker"].tolist() if str(t).strip()]
+        tickers = [t for t in tickers if t and t.upper() not in ("CASH", "USD", "-")]
+
+        if len(tickers) < 500:
+            raise ValueError(f"Suspiciously few tickers parsed ({len(tickers)}) — possible format change.")
 
         with open(cache_file, "w") as f:
-            for t in top1000:
+            for t in tickers:
                 f.write(f"{t}\n")
 
-        logger.info(f"Cached {len(top1000)} Russell 1000 tickers.")
-        return top1000
+        logger.info(f"Cached {len(tickers)} Russell 1000 tickers from iShares IWB.")
+        return tickers
 
     except Exception as e:
-        logger.error(f"Error building Russell 1000 list: {e}")
+        logger.error(f"Error fetching Russell 1000 list from iShares: {e}")
         if os.path.exists(cache_file):
             logger.warning("Returning expired Russell 1000 cache as fallback.")
             with open(cache_file, "r") as f:
                 return [line.strip() for line in f if line.strip()]
+        logger.warning("No Russell 1000 cache available — returning empty list for this cycle.")
         return []
 
 
-def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) -> list:
-    """Generic cached ticker fetcher shared by S&P 500 and NASDAQ-100."""
+def _get_tickers_cached(cache_file: str, url: str, symbol_col, label: str) -> list:
+    """Generic cached ticker fetcher shared by S&P 500, NASDAQ-100, and S&P 400.
+
+    symbol_col can be a single column name (str) or a list of candidate names
+    to try in order — Wikipedia occasionally renames the ticker column
+    (e.g. 'Ticker' -> 'Symbol'), so trying a couple of candidates makes this
+    resilient to that kind of drift without needing a code change each time.
+    """
     cache_expiry_days = 7
+    candidates = [symbol_col] if isinstance(symbol_col, str) else list(symbol_col)
 
     if os.path.exists(cache_file):
         file_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
@@ -168,16 +175,20 @@ def _get_tickers_cached(cache_file: str, url: str, symbol_col: str, label: str) 
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
 
-        tables  = pd.read_html(response.text)
+        from io import StringIO
+        tables  = pd.read_html(StringIO(response.text))
         tickers = None
 
         for table in tables:
-            if symbol_col in table.columns:
-                tickers = [t.replace('.', '-') for t in table[symbol_col].dropna().tolist()]
+            for col in candidates:
+                if col in table.columns:
+                    tickers = [t.replace('.', '-') for t in table[col].dropna().tolist()]
+                    break
+            if tickers:
                 break
 
         if not tickers:
-            raise ValueError(f"Column '{symbol_col}' not found in any Wikipedia table.")
+            raise ValueError(f"None of {candidates} found as a column in any Wikipedia table.")
 
         with open(cache_file, "w") as f:
             for t in tickers:
