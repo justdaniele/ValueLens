@@ -36,14 +36,14 @@ html { scroll-behavior: smooth; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; min-height: 100vh; }
 
 /* ── Disclaimer ── */
-.disclaimer { background: rgba(217,119,6,0.08); border-bottom: 1px solid rgba(217,119,6,0.2); padding: 10px 24px; font-size: 11px; color: #D97706; text-align: center; line-height: 1.5; }
+.disclaimer { background: rgba(217,119,6,0.08); border-bottom: 1px solid rgba(217,119,6,0.2); padding: 10px 24px; font-size: 13px; color: #D97706; text-align: center; line-height: 1.5; }
 .disclaimer b { font-weight: 700; }
 
 /* ── Nav ── */
 nav { display: flex; align-items: center; justify-content: space-between; padding: 0 28px; height: 56px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(10,15,30,0.92); backdrop-filter: blur(12px); z-index: 100; }
 .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; text-decoration: none; color: var(--text); }
 .nav-logo-icon { width: 30px; height: 30px; background: var(--green); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-.nav-back { font-size: 12px; color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 6px; transition: color 0.2s; }
+.nav-back { font-size: 13px; color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 6px; transition: color 0.2s; }
 .nav-back:hover { color: var(--text); }
 
 /* ── Page layout ── */
@@ -51,7 +51,7 @@ nav { display: flex; align-items: center; justify-content: space-between; paddin
 
 /* ── Hero ── */
 .port-hero { margin-bottom: 36px; }
-.port-hero-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
+.port-hero-label { font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
 .port-hero-title { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
 .port-hero-sub { font-size: 13px; color: var(--text-muted); max-width: 520px; }
 
@@ -61,11 +61,11 @@ nav { display: flex; align-items: center; justify-content: space-between; paddin
 .summary-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; }
 .summary-card.highlight { border-color: var(--green-border); background: var(--green-bg); }
 .summary-card.loss { border-color: rgba(220,38,38,0.25); background: var(--red-bg); }
-.sc-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.sc-label { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
 .sc-val { font-size: 22px; font-weight: 700; font-family: var(--mono); color: var(--text); }
 .sc-val.pos { color: var(--green); }
 .sc-val.neg { color: var(--red); }
-.sc-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.sc-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
 
 /* ── Two-column layout ── */
 .port-grid { display: grid; grid-template-columns: 340px 1fr; gap: 24px; margin-bottom: 32px; }
@@ -78,30 +78,30 @@ nav { display: flex; align-items: center; justify-content: space-between; paddin
 .chart-wrap { position: relative; width: 200px; height: 200px; margin: 0 auto 20px; }
 .chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .chart-center-val { font-size: 18px; font-weight: 700; font-family: var(--mono); color: var(--text); }
-.chart-center-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.chart-center-label { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 .legend { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .legend-ticker { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 48px; }
-.legend-pct { color: var(--text-muted); margin-left: auto; font-family: var(--mono); font-size: 11px; }
+.legend-pct { color: var(--text-muted); margin-left: auto; font-family: var(--mono); font-size: 13px; }
 
 /* ── Open positions card ── */
 .positions-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; }
 .pos-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-.pos-table th { padding: 8px 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: left; border-bottom: 1px solid var(--border); }
+.pos-table th { padding: 8px 12px; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: left; border-bottom: 1px solid var(--border); }
 .pos-table td { padding: 12px 12px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
 .pos-table tbody tr:last-child td { border-bottom: none; }
 .pos-table tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .pos-ticker { font-family: var(--mono); font-weight: 700; font-size: 14px; }
-.pos-price { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.pos-price { font-family: var(--mono); font-size: 13px; color: var(--text-muted); }
 .pos-pnl-pos { color: var(--green); font-weight: 700; font-family: var(--mono); }
 .pos-pnl-neg { color: var(--red); font-weight: 700; font-family: var(--mono); }
-.pos-date { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
-.pos-target { font-size: 11px; color: var(--text-muted); }
+.pos-date { font-size: 13px; color: var(--text-muted); font-family: var(--mono); }
+.pos-target { font-size: 13px; color: var(--text-muted); }
 
 /* ── Closed positions ── */
 .closed-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; }
-.close-badge { font-size: 10px; padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.close-badge { font-size: 13px; padding: 2px 8px; border-radius: 99px; font-weight: 600; }
 .cb-target { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .cb-stop   { background: var(--red-bg); color: var(--red); border: 1px solid rgba(220,38,38,0.25); }
 .cb-time   { background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid var(--border); }
@@ -114,7 +114,22 @@ nav { display: flex; align-items: center; justify-content: space-between; paddin
 .loading { text-align: center; padding: 60px; color: var(--text-muted); }
 
 /* ── Footer ── */
-.port-footer { border-top: 1px solid var(--border); margin-top: 60px; padding-top: 24px; font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.port-footer { border-top: 1px solid var(--border); margin-top: 60px; padding-top: 24px; font-size: 13px; color: var(--text-muted); line-height: 1.7; }
+
+/* Live price flash — same effect as the home page's pick cards, so
+   current-price updates here feel consistent with the rest of the site. */
+@keyframes portPulseGreen {
+  0%   { color: var(--text); transform: scale(1); }
+  30%  { color: #5DCAA5; transform: scale(1.08); }
+  100% { color: var(--text); transform: scale(1); }
+}
+@keyframes portPulseRed {
+  0%   { color: var(--text); transform: scale(1); }
+  30%  { color: #F06060; transform: scale(1.08); }
+  100% { color: var(--text); transform: scale(1); }
+}
+.pos-price-live.flash-up   { animation: portPulseGreen 0.8s ease; display: inline-block; }
+.pos-price-live.flash-down { animation: portPulseRed   0.8s ease; display: inline-block; }
 </style>
 </head>
 <body>
@@ -162,6 +177,8 @@ let allocChart = null;  // Chart.js instance, kept alive across refreshes
                          // the canvas (which caused the flash).
 let _lastOpenCount = null;
 let _lastAllocCount = null;
+let _lastPrices = {};  // ticker -> last seen current_price, used to detect
+                        // changes and trigger the flash animation
 
 async function loadPortfolio(isRefresh = false) {
   try {
@@ -221,7 +238,20 @@ function refreshPortfolio(data) {
     const curr   = p.current_price ? fmt(p.current_price) : '—';
 
     const currEl = document.getElementById(`pos-current-${i}`);
-    if (currEl) currEl.textContent = curr;
+    if (currEl) {
+      // Flash green/red when the price actually changes, same effect as
+      // the home page's pick cards (_lastPrices tracks the previous value
+      // per ticker across refreshes).
+      const prevPrice = _lastPrices[p.ticker];
+      if (prevPrice != null && p.current_price != null && prevPrice !== p.current_price) {
+        const direction = p.current_price > prevPrice ? 'flash-up' : 'flash-down';
+        currEl.classList.remove('flash-up', 'flash-down');
+        void currEl.offsetWidth; // force reflow so the animation restarts
+        currEl.classList.add(direction);
+      }
+      if (p.current_price != null) _lastPrices[p.ticker] = p.current_price;
+      currEl.textContent = curr;
+    }
 
     const pnlEl = document.getElementById(`pos-pnl-${i}`);
     if (pnlEl) { pnlEl.textContent = pnlStr; pnlEl.className = pnlCls; }
@@ -303,7 +333,7 @@ function renderPortfolio(data) {
     return `<div class="legend-item">
       <div class="legend-dot" style="background:${color}"></div>
       <span class="legend-ticker">${a.ticker}</span>
-      <span style="font-size:12px;color:var(--text)" id="legend-val-${i}">${fmt(a.value)}</span>
+      <span style="font-size: 13px;color:var(--text)" id="legend-val-${i}">${fmt(a.value)}</span>
       <span class="legend-pct" id="legend-pct-${i}">${pct}%</span>
     </div>`;
   }).join('');
@@ -347,7 +377,7 @@ function renderPortfolio(data) {
           return `<tr>
             <td><span class="pos-ticker">${p.ticker}</span></td>
             <td><span class="pos-price">${fmt(p.entry_price)}</span></td>
-            <td><span class="pos-price" style="color:var(--text)" id="pos-current-${i}">${curr}</span></td>
+            <td><span class="pos-price pos-price-live" style="color:var(--text)" id="pos-current-${i}">${curr}</span></td>
             <td><span class="${pnlCls}" id="pos-pnl-${i}">${pnlStr}</span></td>
             <td><span class="pos-target">${target}${progressHTML}</span></td>
             <td><span class="pos-date">${p.opened_at || '—'}</span></td>
@@ -455,7 +485,7 @@ function isMarketOpen() {
   return minutes >= 570 && minutes < 960;
 }
 
-// Refresh every 3 seconds, but only while the market is open — prices
+// Refresh every 1 second, but only while the market is open — prices
 // (and therefore P&L, the allocation pie, and progress bars) cannot change
 // while it's closed, so re-rendering on a timer just flickers the chart
 // for no reason. Safe at this frequency because the backend streams
@@ -466,7 +496,7 @@ function isMarketOpen() {
 // no flash even at this frequency.
 setInterval(() => {
   if (isMarketOpen()) loadPortfolio(true);
-}, 3_000);
+}, 1_000);
 
 </script>
 </body>
