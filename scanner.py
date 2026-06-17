@@ -105,11 +105,15 @@ def get_russell1000_tickers() -> list:
         response.raise_for_status()
 
         # The iShares CSV has a few metadata rows before the actual holdings table.
-        # We find the header row dynamically by locating the line starting with "Ticker".
+        # We find the header row dynamically by locating the line starting with
+        # "ticker" (case-insensitive) — BlackRock has changed the column casing
+        # on this CSV before (Title Case -> lowercase/snake_case), so matching
+        # case-insensitively makes this resilient to that kind of drift without
+        # needing a code change every time it happens.
         lines = response.text.splitlines()
         header_idx = None
         for i, line in enumerate(lines):
-            if line.strip().startswith("Ticker"):
+            if line.strip().lower().startswith("ticker"):
                 header_idx = i
                 break
 
@@ -120,15 +124,22 @@ def get_russell1000_tickers() -> list:
         csv_body = "\n".join(lines[header_idx:])
         df = pd.read_csv(StringIO(csv_body))
 
-        if "Ticker" not in df.columns:
+        # Resolve actual column names case-insensitively (e.g. "ticker" vs
+        # "Ticker", "asset_class" vs "Asset Class") instead of assuming one
+        # exact casing.
+        col_map = {c.lower().replace("_", " ").strip(): c for c in df.columns}
+        ticker_col = col_map.get("ticker")
+        asset_class_col = col_map.get("asset class")
+
+        if not ticker_col:
             raise ValueError("Ticker column not found in iShares holdings CSV.")
 
         # Drop cash/derivative rows (blank ticker or non-equity asset class)
-        df = df[df["Ticker"].notna()]
-        if "Asset Class" in df.columns:
-            df = df[df["Asset Class"].astype(str).str.contains("Equity", case=False, na=False)]
+        df = df[df[ticker_col].notna()]
+        if asset_class_col:
+            df = df[df[asset_class_col].astype(str).str.contains("Equity", case=False, na=False)]
 
-        tickers = [str(t).strip().replace(".", "-") for t in df["Ticker"].tolist() if str(t).strip()]
+        tickers = [str(t).strip().replace(".", "-") for t in df[ticker_col].tolist() if str(t).strip()]
         tickers = [t for t in tickers if t and t.upper() not in ("CASH", "USD", "-")]
 
         if len(tickers) < 500:
