@@ -110,6 +110,7 @@ def get_russell1000_tickers() -> list:
 
     logger.info("Cache missing or expired. Downloading Russell 1000 constituents from BlackRock fund-document API...")
     try:
+        import re
         import xml.etree.ElementTree as ET
 
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -121,8 +122,19 @@ def get_russell1000_tickers() -> list:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
 
+        # BlackRock's XML export has a bug: hyperlink href attributes (e.g.
+        # "...?style=All&view=quarterlyPerfNav") contain bare "&" characters
+        # instead of the required "&amp;", which makes the document
+        # technically invalid XML and breaks strict parsing. Escape any "&"
+        # that isn't already part of a valid entity (&amp; &lt; &gt; &quot;
+        # &apos; or a numeric &#123; / &#x1F;) before parsing — this fixes
+        # the malformed hrefs without double-escaping entities that are
+        # already correct elsewhere in the document.
+        xml_text = response.content.decode("utf-8", errors="replace")
+        xml_text = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)", "&amp;", xml_text)
+
         ns = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(xml_text)
         rows = root.findall(".//ss:Worksheet/ss:Table/ss:Row", ns)
 
         if not rows:
