@@ -318,11 +318,37 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
     """
     Third pass: full .info fetch validating P/E ratio and analyst upside.
     pe_threshold overridable via PE_THRESHOLD env var.
+
+    Analyst target scaling — Wall Street's targetMeanPrice is a 12-month
+    forecast (sometimes 6 or 18), not a 90-day one. The virtual portfolio
+    holds positions for 90 days, so treating the full 12-month target as
+    achievable in that window systematically overstates near-term upside
+    (e.g. INTU's +74% 12-month consensus isn't a +74%-in-90-days call).
+    Instead of discarding genuinely strong picks just because their annual
+    upside looks large, we scale the upside linearly to the 90-day window
+    (upside_90d = upside_12m * 90/365) and rescale target_mean to match —
+    so a pick with +74% annual upside becomes roughly +18% over 90 days,
+    which is what the virtual portfolio's target/stop/time exit logic
+    actually uses. HOLDING_DAYS is overridable via env var to stay in sync
+    with whatever holding period the virtual portfolio uses elsewhere.
+
+    MIN_UPSIDE_PCT (default 0, overridable via env var) still rejects
+    tickers whose target is at or below the current price — a pick with
+    negative or zero upside is a bug, not a recommendation, and would
+    otherwise cause the virtual portfolio to open and immediately close
+    the position (current price already at/above the target).
+
     Returns list of dicts carrying the fetched info so callers don't re-fetch.
-    universe_source is preserved from the input list.
+    universe_source is preserved from the input list. The returned info dict
+    has targetMeanPrice replaced with the 90-day-scaled value, so downstream
+    code (DB save, virtual portfolio open) automatically uses the realistic
+    target without needing any further changes.
     """
-    pe_threshold = int(os.environ.get("PE_THRESHOLD", pe_threshold))
-    candidates   = []
+    pe_threshold  = int(os.environ.get("PE_THRESHOLD", pe_threshold))
+    min_upside    = float(os.environ.get("MIN_UPSIDE_PCT", 0)) / 100
+    holding_days  = float(os.environ.get("HOLDING_DAYS", 90))
+    scale_factor  = holding_days / 365
+    candidates    = []
 
     for item in tickers_list:
         ticker          = item["ticker"]
@@ -331,22 +357,40 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
             logger.info(f"Deep scan: {ticker}...")
             info = yf.Ticker(ticker).info
 
-            current     = info.get("currentPrice") or info.get("regularMarketPrice")
-            target_mean = info.get("targetMeanPrice")
-            pe          = info.get("trailingPE") or info.get("forwardPE")
+            current        = info.get("currentPrice") or info.get("regularMarketPrice")
+            target_mean_1y = info.get("targetMeanPrice")
+            pe             = info.get("trailingPE") or info.get("forwardPE")
 
             if pe is not None and pe > pe_threshold:
                 logger.info(f"Rejected {ticker}: P/E {pe} > {pe_threshold}.")
                 continue
 
-            if current and target_mean and current > 0:
-                upside = (target_mean - current) / current
-                candidates.append({
-                    "ticker": ticker,
-                    "universe_source": universe_source,
-                    "upside": upside,
-                    "info": info,
-                })
+            if not (current and target_mean_1y and current > 0):
+                continue
+
+            upside_1y = (target_mean_1y - current) / current
+
+            if upside_1y <= min_upside:
+                logger.info(f"Rejected {ticker}: 12-month upside {upside_1y*100:.1f}% <= {min_upside*100:.0f}% (target ${target_mean_1y:.2f} vs current ${current:.2f}).")
+                continue
+
+            # Scale the 12-month consensus upside down to the 90-day holding
+            # window, then rescale target_mean to match. This is what makes
+            # the +74%-in-12-months INTU case become a realistic +18% target
+            # for the actual holding period, instead of either an absurd
+            # 90-day target or a discarded pick.
+            upside_90d        = upside_1y * scale_factor
+            target_mean_90d   = current * (1 + upside_90d)
+            info["targetMeanPrice"] = target_mean_90d
+
+            logger.info(f"{ticker}: 12mo upside {upside_1y*100:.1f}% scaled to {holding_days:.0f}d upside {upside_90d*100:.1f}% (target ${target_mean_1y:.2f} -> ${target_mean_90d:.2f}).")
+
+            candidates.append({
+                "ticker": ticker,
+                "universe_source": universe_source,
+                "upside": upside_90d,
+                "info": info,
+            })
 
         except Exception as e:
             logger.warning(f"Deep scan skipped {ticker}: {e}")

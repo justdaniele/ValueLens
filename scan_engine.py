@@ -51,15 +51,19 @@ def _generate_chart(ticker: str):
         import numpy as np
 
         stock = yf.Ticker(ticker)
-        hist  = stock.history(period="30d")
+        # Fetch 50d so MA20 and RSI(14) have enough warmup history to be
+        # fully populated across the visible 30-day window — otherwise the
+        # first ~20 days of MA20 are NaN and the line only appears halfway
+        # through the chart.
+        hist  = stock.history(period="50d")
 
         if hist.empty or "Close" not in hist.columns:
             return None
 
-        prices = hist["Close"]
-        dates  = prices.index
+        # Compute RSI(14) and MA20 on the full 50-day series, then slice
+        # down to the last 30 days for display once both are warmed up.
+        full_prices = hist["Close"]
 
-        # Compute RSI(14) manually — no pandas-ta dependency needed
         def _rsi(series, period=14):
             delta = series.diff()
             gain  = delta.clip(lower=0).rolling(period).mean()
@@ -67,8 +71,14 @@ def _generate_chart(ticker: str):
             rs    = gain / loss.replace(0, float("inf"))
             return 100 - (100 / (1 + rs))
 
-        rsi_values = _rsi(prices)
-        ma20       = prices.rolling(20).mean()
+        full_rsi  = _rsi(full_prices)
+        full_ma20 = full_prices.rolling(20).mean()
+
+        hist30  = hist.tail(30)
+        dates   = hist30.index
+        prices  = hist30["Close"]
+        rsi_values = full_rsi.reindex(dates)
+        ma20       = full_ma20.reindex(dates)
 
         # Two-panel layout: price (top) + RSI (bottom)
         fig, (ax, ax_rsi) = plt.subplots(
@@ -89,7 +99,7 @@ def _generate_chart(ticker: str):
         ax.fill_between(dates, prices, prices.min() * 0.995,
                         color=color, alpha=0.12, zorder=2)
 
-        # 20-day MA overlay
+        # 20-day MA overlay — now fully populated across the visible window
         ax.plot(dates, ma20, color="#3B82F6", linewidth=1.2,
                 linestyle="--", alpha=0.75, label="MA20", zorder=3)
         ax.legend(loc="upper left", fontsize=8,
@@ -122,7 +132,7 @@ def _generate_chart(ticker: str):
             color="#E2E8F0", fontsize=12, fontweight="bold", pad=10
         )
 
-        plt.tight_layout()
+        fig.tight_layout()
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=150,
                     facecolor=fig.get_facecolor(), bbox_inches="tight")
