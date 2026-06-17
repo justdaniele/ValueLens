@@ -119,8 +119,6 @@ def init_db():
         "ALTER TABLE insider_signals ADD COLUMN total_value REAL DEFAULT 0.0",
         "ALTER TABLE insider_signals ADD COLUMN num_transactions INTEGER DEFAULT 0",
         "ALTER TABLE earnings_predictions ADD COLUMN ees_score INTEGER DEFAULT 0",
-        "ALTER TABLE nightly_reports ADD COLUMN universe_source TEXT DEFAULT 'sp500'",
-        "ALTER TABLE earnings_predictions ADD COLUMN earnings_date DATETIME DEFAULT NULL",
     ]
     for migration in migrations:
         try:
@@ -133,45 +131,26 @@ def init_db():
     logger.info("Database schema initialized and fully matched with tracking engines.")
 
 
-def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None, universe_source="sp500"):
-    """Saves a generated AI report to the database.
-
-    Args:
-        ticker: Stock ticker symbol.
-        report_text: AI-generated HTML report text.
-        lang: Language code ('en' or 'it').
-        current_price: Price at analysis time.
-        target_price: Analyst consensus target price.
-        universe_source: Index the ticker belongs to ('sp500', 'nasdaq100', 'sp400', 'russell1000').
-    """
+def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None):
+    """Saves a generated AI report to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price, universe_source)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (ticker, report_text, lang, current_price, target_price, universe_source))
+        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price)
+        VALUES (?, ?, ?, ?, ?)
+    """, (ticker, report_text, lang, current_price, target_price))
     conn.commit()
     conn.close()
 
 
-def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0, earnings_date=None):
-    """Saves a dynamic earnings sniper prediction to the database.
-
-    Args:
-        ticker: Stock ticker symbol.
-        price_at_signal: Price at the time the prediction was generated.
-        prediction: 'BULLISH' or 'BEARISH'.
-        ees_score: Combined quant + AI sentiment score.
-        earnings_date: The real upcoming earnings datetime (ISO string), used to
-            determine when the prediction moves from Upcoming to Released.
-            If None, the released status falls back to the 24h evaluation timer.
-    """
+def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0):
+    """Saves a dynamic earnings sniper prediction to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score, earnings_date)
-        VALUES (?, ?, ?, ?, ?)
-    """, (ticker, price_at_signal, prediction, ees_score, earnings_date))
+        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score)
+        VALUES (?, ?, ?, ?)
+    """, (ticker, price_at_signal, prediction, ees_score))
     conn.commit()
     conn.close()
 
@@ -229,22 +208,14 @@ def get_weekly_summary_stats():
 
 
 def evaluate_historical_accuracy_loop():
-    """Evaluates pending earnings predictions against current market price data to calculate true win/loss metrics.
-
-    A prediction is only evaluated once its real earnings_date has passed.
-    If earnings_date is missing (legacy rows or lookup failure at signal time),
-    falls back to the previous 24h-after-signal heuristic so old rows still progress.
-    """
+    """Evaluates pending earnings predictions against current market price data to calculate true win/loss metrics."""
     logger.info("Starting historical accuracy validation sweep...")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
+    
     cursor.execute(
         "SELECT id, ticker, price_at_signal, prediction FROM earnings_predictions "
-        "WHERE is_evaluated = 0 AND ("
-        "   (earnings_date IS NOT NULL AND earnings_date <= datetime('now'))"
-        "   OR (earnings_date IS NULL AND timestamp <= datetime('now', '-24 hours'))"
-        ")"
+        "WHERE is_evaluated = 0 AND timestamp <= datetime('now', '-24 hours')"
     )
     pending = cursor.fetchall()
     
@@ -388,7 +359,7 @@ def get_portfolio_cash(conn=None) -> float:
 def open_virtual_position(ticker: str, entry_price: float, target_price: float = None):
     """Opens a virtual position if sufficient cash is available.
 
-    Position size = 5% of starting capital ($5,000).
+    Position size = 1% of starting capital ($1,000).
     Returns True if position was opened.
     """
     conn = sqlite3.connect(DB_NAME)
@@ -401,7 +372,7 @@ def open_virtual_position(ticker: str, entry_price: float, target_price: float =
         return False
 
     cash = get_portfolio_cash(conn)
-    position_value = PORTFOLIO_STARTING_CASH * POSITION_SIZE_PCT  # $5,000
+    position_value = PORTFOLIO_STARTING_CASH * POSITION_SIZE_PCT  # $1,000
 
     if cash < position_value:
         logger.info(f"Portfolio: insufficient cash (${cash:,.0f}) to open {ticker} position.")
@@ -421,14 +392,6 @@ def open_virtual_position(ticker: str, entry_price: float, target_price: float =
     conn.commit()
     conn.close()
     logger.info(f"Portfolio: opened {ticker} @ ${entry_price:.2f} ({shares:.2f} shares, ${position_value:,.0f})")
-
-    # Notify Telegram — lazy import avoids a circular dependency with scanner.py
-    try:
-        from scanner import notify_portfolio_event
-        notify_portfolio_event("OPEN", ticker, entry_price, {"target_price": target_price})
-    except Exception as e:
-        logger.warning(f"Portfolio OPEN notification failed for {ticker}: {e}")
-
     return True
 
 
@@ -479,13 +442,6 @@ def evaluate_virtual_positions():
                     WHERE id = ?
                 """, (curr_price, close_reason, pnl_pct, pos_id))
                 logger.info(f"Portfolio: closed {ticker} @ ${curr_price:.2f} ({pnl_pct:+.1f}%) — {close_reason}")
-
-                # Notify Telegram — lazy import avoids a circular dependency with scanner.py
-                try:
-                    from scanner import notify_portfolio_event
-                    notify_portfolio_event(close_reason, ticker, curr_price, {"pnl_pct": pnl_pct})
-                except Exception as e:
-                    logger.warning(f"Portfolio {close_reason} notification failed for {ticker}: {e}")
 
         except Exception as e:
             logger.warning(f"Portfolio evaluation failed for {ticker}: {e}")
