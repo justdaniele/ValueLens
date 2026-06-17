@@ -135,10 +135,30 @@ def get_russell1000_tickers() -> list:
 
         ns = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
         root = ET.fromstring(xml_text)
-        rows = root.findall(".//ss:Worksheet/ss:Table/ss:Row", ns)
+
+        # The workbook has multiple worksheets — Disclaimers, Holdings,
+        # Historical, Performance, Distributions — and the holdings table
+        # we actually want is named "Holdings", not necessarily the first
+        # sheet in document order (it's currently the second). Searching
+        # with ".//" across the whole document, or assuming sheet 0, both
+        # pull in unrelated rows (e.g. monthly historical dates), inflating
+        # the ticker count with garbage. Look the sheet up by name instead,
+        # case-insensitively, so this stays correct even if BlackRock
+        # reorders the sheets again.
+        worksheet_attr = "{urn:schemas-microsoft-com:office:spreadsheet}Name"
+        holdings_sheet = None
+        for ws in root.findall("ss:Worksheet", ns):
+            if (ws.get(worksheet_attr) or "").strip().lower() == "holdings":
+                holdings_sheet = ws
+                break
+
+        if holdings_sheet is None:
+            raise ValueError("Could not find a 'Holdings' worksheet in iShares SpreadsheetML file.")
+
+        rows = holdings_sheet.findall("ss:Table/ss:Row", ns)
 
         if not rows:
-            raise ValueError("No rows found in iShares SpreadsheetML holdings file.")
+            raise ValueError("No rows found in iShares Holdings worksheet.")
 
         def _row_values(row):
             """Extracts cell text values from a SpreadsheetML <Row>, in order."""
