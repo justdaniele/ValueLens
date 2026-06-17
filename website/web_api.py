@@ -23,6 +23,8 @@ import yfinance as yf
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
+import live_stream
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] ValueLensAPI: %(message)s"
@@ -411,8 +413,23 @@ def price_history(ticker: str):
 # Small in-memory cache so a 10s frontend poll doesn't hammer yfinance when
 # multiple browser tabs/users are open at once. Keyed by ticker, values are
 # {"price": float, "change": float, "ts": epoch_seconds}.
+#
+# This same dict is now also written to directly by live_stream.py's
+# persistent Yahoo Finance WebSocket connection — see attach_cache() below.
+# _fetch_live_quote()'s per-ticker HTTP call below becomes a fallback for
+# any ticker the WebSocket hasn't pushed a fresh price for yet (e.g. right
+# after startup, or a symbol not currently subscribed), rather than the
+# primary path. Once the WebSocket is delivering updates, most cache hits
+# come from the stream, not from a fresh HTTP request.
 _live_price_cache: dict = {}
-_LIVE_PRICE_TTL_SECS = 8  # slightly under the 10s frontend poll interval
+_LIVE_PRICE_TTL_SECS = 30  # fallback TTL for the HTTP path only — the
+                           # WebSocket keeps prices fresh independently of
+                           # this value, so it just controls how long we
+                           # wait before re-trying HTTP for a ticker the
+                           # stream hasn't delivered a price for yet
+
+live_stream.attach_cache(_live_price_cache)
+live_stream.start_streamer()
 
 
 def _fetch_live_quote(ticker: str):
@@ -436,9 +453,21 @@ def _fetch_live_quote(ticker: str):
 
 
 def _get_live_quotes(tickers: list) -> dict:
-    """Returns {ticker: {price, change}} for the given tickers, using the
-    short-lived in-memory cache to avoid refetching within _LIVE_PRICE_TTL_SECS.
+    """Returns {ticker: {price, change}} for the given tickers.
+
+    Two sources feed the same _live_price_cache dict:
+      1. live_stream.py's WebSocket — pushes updates continuously while
+         the market is open, for any ticker currently subscribed.
+      2. The HTTP fallback below — used when a ticker isn't in the cache
+         yet (e.g. right after the WebSocket subscribes to it, or before
+         the first push arrives), so the frontend never sees a blank price
+         while waiting for the stream to catch up.
+
+    Every call also tells live_stream to subscribe to these tickers, so
+    subsequent calls are served from the stream rather than HTTP.
     """
+    live_stream.update_subscriptions(tickers)
+
     now = _time.time()
     result = {}
     to_fetch = []

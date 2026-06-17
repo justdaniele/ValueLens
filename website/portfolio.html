@@ -156,14 +156,106 @@ const CHART_COLORS = [
 function fmt(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtPct(n) { const s = n >= 0 ? '+' : ''; return s + n.toFixed(2) + '%'; }
 
-async function loadPortfolio() {
+let allocChart = null;  // Chart.js instance, kept alive across refreshes
+                         // so periodic updates animate smoothly via
+                         // chart.update() instead of destroying/recreating
+                         // the canvas (which caused the flash).
+let _lastOpenCount = null;
+let _lastAllocCount = null;
+
+async function loadPortfolio(isRefresh = false) {
   try {
     const data = await fetchJSON('/api/portfolio');
-    renderPortfolio(data);
+    const openCount  = (data.open_positions || []).length;
+    const allocCount = (data.allocation || []).length;
+
+    // The lightweight refresh path assumes the same number of rows/legend
+    // items exist as last render (it targets them by index). If a position
+    // opened or closed since then, row count changed, so fall back to a
+    // full render to rebuild the structure correctly.
+    const structureChanged = isRefresh && (openCount !== _lastOpenCount || allocCount !== _lastAllocCount);
+
+    if (isRefresh && allocChart && !structureChanged) {
+      refreshPortfolio(data);
+    } else {
+      renderPortfolio(data);
+    }
+    _lastOpenCount  = openCount;
+    _lastAllocCount = allocCount;
   } catch(e) {
     document.getElementById('page-content').innerHTML =
       `<div class="empty"><i class="ti ti-alert-circle"></i>Could not load portfolio data.<br>${e.message}</div>`;
   }
+}
+
+// Lightweight refresh — updates existing DOM text and the chart's data in
+// place instead of rebuilding innerHTML and recreating the Chart.js canvas.
+// This is what eliminates the pie-chart flash on each 3s poll: Chart.js
+// animates the transition between old and new values via chart.update(),
+// rather than the whole canvas being destroyed and redrawn from scratch.
+function refreshPortfolio(data) {
+  const s = data.summary;
+  const openPos = data.open_positions || [];
+  const alloc = data.allocation || [];
+  const returnPos = s.total_return_pct >= 0;
+  const returnCls = returnPos ? 'pos' : 'neg';
+
+  // Summary cards — update text only, classes only where they can flip sign
+  const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const setCls  = (id, cls)  => { const el = document.getElementById(id); if (el) el.className = cls; };
+
+  setText('sc-portfolio-value', fmt(s.portfolio_value));
+  setCls('sc-portfolio-value', `sc-val ${returnCls}`);
+  setText('sc-total-return', fmtPct(s.total_return_pct));
+  setCls('sc-total-return', `sc-val ${returnCls}`);
+  setText('sc-cash-available', fmt(s.cash_available));
+  setText('sc-cash-sub', `${s.open_positions} positions open`);
+  setText('sc-realized-pnl', fmt(s.realized_pnl));
+  setCls('sc-realized-pnl', `sc-val ${s.realized_pnl >= 0 ? 'pos' : 'neg'}`);
+
+  // Open positions table — update current price / P&L / progress bar cells
+  // in place by row index, leaving row structure untouched.
+  openPos.forEach((p, i) => {
+    const pnlCls = p.pnl_pct >= 0 ? 'pos-pnl-pos' : 'pos-pnl-neg';
+    const pnlStr = `${fmtPct(p.pnl_pct)} (${fmt(p.pnl_abs)})`;
+    const curr   = p.current_price ? fmt(p.current_price) : '—';
+
+    const currEl = document.getElementById(`pos-current-${i}`);
+    if (currEl) currEl.textContent = curr;
+
+    const pnlEl = document.getElementById(`pos-pnl-${i}`);
+    if (pnlEl) { pnlEl.textContent = pnlStr; pnlEl.className = pnlCls; }
+
+    if (p.target_price && p.current_price && p.entry_price) {
+      const progress = Math.min(100, Math.max(0, (p.current_price - p.entry_price) / (p.target_price - p.entry_price) * 100));
+      const barEl = document.getElementById(`pos-progress-${i}`);
+      if (barEl) barEl.style.width = progress + '%';
+    }
+  });
+
+  // Pie chart — update the existing instance's data and let Chart.js
+  // animate the transition, instead of calling `new Chart()` again.
+  const total = alloc.reduce((a, b) => a + b.value, 0);
+  const chartColors = alloc.map((_, i) => i === alloc.length - 1 ? 'rgba(255,255,255,0.08)' : CHART_COLORS[i % CHART_COLORS.length]);
+
+  if (allocChart) {
+    allocChart.data.labels = alloc.map(a => a.ticker);
+    allocChart.data.datasets[0].data = alloc.map(a => a.value);
+    allocChart.data.datasets[0].backgroundColor = chartColors;
+    allocChart.update();
+  }
+
+  const centerVal = document.querySelector('.chart-center-val');
+  if (centerVal) centerVal.textContent = fmt(total);
+
+  // Legend values/percentages — update in place by index
+  alloc.forEach((a, i) => {
+    const pct = total > 0 ? (a.value / total * 100).toFixed(1) : '0';
+    const valEl = document.getElementById(`legend-val-${i}`);
+    const pctEl = document.getElementById(`legend-pct-${i}`);
+    if (valEl) valEl.textContent = fmt(a.value);
+    if (pctEl) pctEl.textContent = pct + '%';
+  });
 }
 
 function renderPortfolio(data) {
@@ -181,22 +273,22 @@ function renderPortfolio(data) {
     <div class="summary-grid">
       <div class="summary-card ${returnCard}">
         <div class="sc-label">Portfolio Value</div>
-        <div class="sc-val ${returnCls}">${fmt(s.portfolio_value)}</div>
+        <div class="sc-val ${returnCls}" id="sc-portfolio-value">${fmt(s.portfolio_value)}</div>
         <div class="sc-sub">Started at ${fmt(s.starting_cash)}</div>
       </div>
       <div class="summary-card">
         <div class="sc-label">Total Return</div>
-        <div class="sc-val ${returnCls}">${fmtPct(s.total_return_pct)}</div>
+        <div class="sc-val ${returnCls}" id="sc-total-return">${fmtPct(s.total_return_pct)}</div>
         <div class="sc-sub">Unrealized + Realized P&L</div>
       </div>
       <div class="summary-card">
         <div class="sc-label">Cash Available</div>
-        <div class="sc-val">${fmt(s.cash_available)}</div>
-        <div class="sc-sub">${s.open_positions} positions open</div>
+        <div class="sc-val" id="sc-cash-available">${fmt(s.cash_available)}</div>
+        <div class="sc-sub" id="sc-cash-sub">${s.open_positions} positions open</div>
       </div>
       <div class="summary-card">
         <div class="sc-label">Realized P&L</div>
-        <div class="sc-val ${s.realized_pnl >= 0 ? 'pos' : 'neg'}">${fmt(s.realized_pnl)}</div>
+        <div class="sc-val ${s.realized_pnl >= 0 ? 'pos' : 'neg'}" id="sc-realized-pnl">${fmt(s.realized_pnl)}</div>
         <div class="sc-sub">From ${closedPos.length} closed trades</div>
       </div>
     </div>`;
@@ -211,8 +303,8 @@ function renderPortfolio(data) {
     return `<div class="legend-item">
       <div class="legend-dot" style="background:${color}"></div>
       <span class="legend-ticker">${a.ticker}</span>
-      <span style="font-size:12px;color:var(--text)">${fmt(a.value)}</span>
-      <span class="legend-pct">${pct}%</span>
+      <span style="font-size:12px;color:var(--text)" id="legend-val-${i}">${fmt(a.value)}</span>
+      <span class="legend-pct" id="legend-pct-${i}">${pct}%</span>
     </div>`;
   }).join('');
 
@@ -239,7 +331,7 @@ function renderPortfolio(data) {
         <th>Ticker</th><th>Entry</th><th>Current</th><th>P&L</th><th>Target</th><th>Opened</th>
       </tr></thead>
       <tbody>
-        ${openPos.map(p => {
+        ${openPos.map((p, i) => {
           const pnlCls = p.pnl_pct >= 0 ? 'pos-pnl-pos' : 'pos-pnl-neg';
           const pnlStr = `${fmtPct(p.pnl_pct)} (${fmt(p.pnl_abs)})`;
           const curr = p.current_price ? fmt(p.current_price) : '—';
@@ -249,14 +341,14 @@ function renderPortfolio(data) {
           if (p.target_price && p.current_price && p.entry_price) {
             const progress = Math.min(100, Math.max(0, (p.current_price - p.entry_price) / (p.target_price - p.entry_price) * 100));
             progressHTML = `<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;margin-top:4px;width:80px">
-              <div style="height:100%;width:${progress}%;background:var(--green);border-radius:99px"></div>
+              <div id="pos-progress-${i}" style="height:100%;width:${progress}%;background:var(--green);border-radius:99px"></div>
             </div>`;
           }
           return `<tr>
             <td><span class="pos-ticker">${p.ticker}</span></td>
             <td><span class="pos-price">${fmt(p.entry_price)}</span></td>
-            <td><span class="pos-price" style="color:var(--text)">${curr}</span></td>
-            <td><span class="${pnlCls}">${pnlStr}</span></td>
+            <td><span class="pos-price" style="color:var(--text)" id="pos-current-${i}">${curr}</span></td>
+            <td><span class="${pnlCls}" id="pos-pnl-${i}">${pnlStr}</span></td>
             <td><span class="pos-target">${target}${progressHTML}</span></td>
             <td><span class="pos-date">${p.opened_at || '—'}</span></td>
           </tr>`;
@@ -324,7 +416,7 @@ function renderPortfolio(data) {
   // Init pie chart
   if (alloc.length > 0) {
     const ctx = document.getElementById('alloc-chart').getContext('2d');
-    new Chart(ctx, {
+    allocChart = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: alloc.map(a => a.ticker),
@@ -363,13 +455,18 @@ function isMarketOpen() {
   return minutes >= 570 && minutes < 960;
 }
 
-// Refresh every 10 seconds, but only while the market is open — prices
+// Refresh every 3 seconds, but only while the market is open — prices
 // (and therefore P&L, the allocation pie, and progress bars) cannot change
 // while it's closed, so re-rendering on a timer just flickers the chart
-// for no reason.
+// for no reason. Safe at this frequency because the backend streams
+// prices via a persistent Yahoo WebSocket (see web_api.py/live_stream.py)
+// — this poll only reads the Pi's local cache, not a fresh Yahoo request
+// per tick. The refresh itself updates the chart/DOM in place (see
+// refreshPortfolio above) instead of rebuilding everything, so there's
+// no flash even at this frequency.
 setInterval(() => {
-  if (isMarketOpen()) loadPortfolio();
-}, 10_000);
+  if (isMarketOpen()) loadPortfolio(true);
+}, 3_000);
 
 </script>
 </body>
