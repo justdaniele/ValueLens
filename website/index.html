@@ -756,7 +756,7 @@ footer {
     <div class="hero-divider"></div>
     <div class="hero-stat">
       <div class="hero-stat-val" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">
-        <span style="color:var(--green)">$100k</span>
+        <span id="stat-portfolio-value" style="color:var(--green)">—</span>
       </div>
       <div class="hero-stat-label" style="cursor:pointer" onclick="window.location.href='/portfolio.html'">virtual portfolio →</div>
       <div class="hero-market-status" id="hero-market-status">
@@ -1030,8 +1030,8 @@ async function fetchJSON(endpoint) {
 // ─── Load all sections ───
 async function loadAll() {
   updateMarketStatusBadge();
-  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos()]);
-  // Start live price updates every 10 seconds during market hours
+  await Promise.all([loadMeta(), loadPicks(), loadEarnings(), loadInsiders(), loadCombos(), loadPortfolioValue()]);
+  // Start live price updates every second during market hours
   startLivePriceUpdates();
 }
 
@@ -1044,6 +1044,23 @@ function countUp(el, target, suffix, duration) {
     el.textContent = Math.round(current) + suffix;
     if (current >= target) clearInterval(t);
   }, 16);
+}
+
+// ─── Hero virtual portfolio value ───
+// Shows the live portfolio value instead of a static "$100k" label, since
+// the simulated portfolio's value moves with the market just like the
+// individual pick prices do.
+async function loadPortfolioValue() {
+  try {
+    const d = await fetchJSON('/api/portfolio');
+    const val = d?.summary?.portfolio_value;
+    const el  = document.getElementById('stat-portfolio-value');
+    if (el && val != null) {
+      const isUp = val >= d.summary.starting_cash;
+      el.textContent = '$' + Math.round(val).toLocaleString('en-US');
+      el.style.color = isUp ? 'var(--green)' : 'var(--red)';
+    }
+  } catch(e) { /* stays as — if the API call fails — non-critical */ }
 }
 
 // ─── Meta / hero stats ───
@@ -1779,12 +1796,14 @@ function startLivePriceUpdates() {
   }
 
   fetchLivePrices(); // Immediate first fetch
+  loadPortfolioValue();
   const interval = setInterval(() => {
     if (!isMarketOpen()) {
       clearInterval(interval);
       return;
     }
     fetchLivePrices();
+    loadPortfolioValue();
   }, 1_000); // Every 1 second — safe because the backend streams prices
              // via a persistent Yahoo WebSocket; this poll only reads the
              // Pi's local cache, not a fresh Yahoo request per tick.
