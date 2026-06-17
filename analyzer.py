@@ -60,6 +60,13 @@ def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_in
     short_float = info.get("shortPercentOfFloat")
     short_interest_str = f"{short_float * 100:.2f}%" if short_float is not None else "N/A"
 
+    # RSI must be computed once, before the lang branch — it used to live
+    # only inside the `else` (English) branch, so the Italian branch tried
+    # to read rsi_str before it was ever assigned (UnboundLocalError on
+    # every IT report generation).
+    rsi_val = _compute_rsi(ticker)
+    rsi_str = f"{rsi_val} ({'⚠️ overbought' if rsi_val and rsi_val >= 70 else '🟢 oversold' if rsi_val and rsi_val <= 30 else 'neutral'})" if rsi_val else "N/A"
+
     if lang == "it":
         user_content = (
             f"Genera un brief per <b>{ticker}</b> ({info.get('shortName', ticker)}) usando questi dati reali:\n"
@@ -80,9 +87,6 @@ def analyze_company(ticker: str, mode: str = "PRO", lang: str = "en", company_in
             f"(Linea SCORES: ogni X e' un intero da -10 ribassista a +10 rialzista per quella sezione)"
         )
     else:
-        rsi_val = _compute_rsi(ticker)
-        rsi_str = f"{rsi_val} ({'⚠️ overbought' if rsi_val and rsi_val >= 70 else '🟢 oversold' if rsi_val and rsi_val <= 30 else 'neutral'})" if rsi_val else "N/A"
-
         user_content = (
             f"Generate a brief for <b>{ticker}</b> ({info.get('shortName', ticker)}) using this real data:\n"
             f"- P/E: {info.get('trailingPE', 'N/A')} | P/B: {info.get('priceToBook', 'N/A')}\n"
