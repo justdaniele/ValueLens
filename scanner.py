@@ -78,11 +78,21 @@ def get_sp400_tickers() -> list:
 def get_russell1000_tickers() -> list:
     """Returns the current Russell 1000 Index constituents.
 
-    Sourced from the official iShares Russell 1000 ETF (IWB) holdings CSV,
+    Sourced from the official iShares Russell 1000 ETF (IWB) holdings file,
     which BlackRock publishes daily and tracks the index almost exactly
     (~1000 holdings). This is the only free, reliable, and complete source —
     Wikipedia does not maintain a full Russell 1000/2000 constituent list.
     Results are cached locally for 7 days.
+
+    NOTE: BlackRock retired the old direct CSV ajax endpoint (the URL used
+    to end in "<hash>.ajax?fileType=csv...") — it now returns the product
+    page's HTML instead of the file, even though it still claims a
+    text/csv Content-Type. The current working source is BlackRock's
+    fund-document API, which returns the holdings as an Excel file
+    (.xls/.xlsx) rather than CSV. If this breaks again in the future, check
+    the "Data Download" link on the fund's page at
+    https://www.ishares.com/us/products/239707/ishares-russell-1000-etf
+    for whatever the current endpoint/format is.
     """
     cache_file = "russell1000_tickers.txt"
     cache_expiry_days = 7
@@ -94,45 +104,48 @@ def get_russell1000_tickers() -> list:
             with open(cache_file, "r") as f:
                 return [line.strip() for line in f if line.strip()]
 
-    logger.info("Cache missing or expired. Downloading Russell 1000 constituents from iShares IWB holdings CSV...")
+    logger.info("Cache missing or expired. Downloading Russell 1000 constituents from BlackRock fund-document API...")
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         url = (
-            "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/"
-            "1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund"
+            "https://www.blackrock.com/varnish-api/blk-one01-product-data/product-data/api/v1/get-fund-document"
+            "?appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=us-ishares&locale=en_US"
+            "&portfolioId=239707&component=fundDownload&userType=individual"
         )
-        response = requests.get(url, headers=headers, timeout=20)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
 
-        # The iShares CSV has a few metadata rows before the actual holdings table.
-        # We find the header row dynamically by locating the line starting with
-        # "ticker" (case-insensitive) — BlackRock has changed the column casing
-        # on this CSV before (Title Case -> lowercase/snake_case), so matching
-        # case-insensitively makes this resilient to that kind of drift without
-        # needing a code change every time it happens.
-        lines = response.text.splitlines()
+        from io import BytesIO
+        excel_bytes = BytesIO(response.content)
+
+        # The holdings table has a few metadata rows above it, same as the
+        # old CSV did — read without a header first, find the row that
+        # starts with "ticker" (case-insensitive), then re-read using that
+        # row as the actual header.
+        raw = pd.read_excel(excel_bytes, header=None, engine=None)
+
         header_idx = None
-        for i, line in enumerate(lines):
-            if line.strip().lower().startswith("ticker"):
+        for i in range(len(raw)):
+            first_cell = str(raw.iloc[i, 0]).strip().lower()
+            if first_cell.startswith("ticker"):
                 header_idx = i
                 break
 
         if header_idx is None:
-            raise ValueError("Could not locate holdings header row in iShares CSV.")
+            raise ValueError("Could not locate holdings header row in iShares holdings file.")
 
-        from io import StringIO
-        csv_body = "\n".join(lines[header_idx:])
-        df = pd.read_csv(StringIO(csv_body))
+        excel_bytes.seek(0)
+        df = pd.read_excel(excel_bytes, header=header_idx, engine=None)
 
         # Resolve actual column names case-insensitively (e.g. "ticker" vs
         # "Ticker", "asset_class" vs "Asset Class") instead of assuming one
-        # exact casing.
-        col_map = {c.lower().replace("_", " ").strip(): c for c in df.columns}
+        # exact casing — BlackRock has changed this before.
+        col_map = {str(c).lower().replace("_", " ").strip(): c for c in df.columns}
         ticker_col = col_map.get("ticker")
         asset_class_col = col_map.get("asset class")
 
         if not ticker_col:
-            raise ValueError("Ticker column not found in iShares holdings CSV.")
+            raise ValueError("Ticker column not found in iShares holdings file.")
 
         # Drop cash/derivative rows (blank ticker or non-equity asset class)
         df = df[df[ticker_col].notna()]
@@ -140,7 +153,7 @@ def get_russell1000_tickers() -> list:
             df = df[df[asset_class_col].astype(str).str.contains("Equity", case=False, na=False)]
 
         tickers = [str(t).strip().replace(".", "-") for t in df[ticker_col].tolist() if str(t).strip()]
-        tickers = [t for t in tickers if t and t.upper() not in ("CASH", "USD", "-")]
+        tickers = [t for t in tickers if t and t.upper() not in ("CASH", "USD", "-", "NAN")]
 
         if len(tickers) < 500:
             raise ValueError(f"Suspiciously few tickers parsed ({len(tickers)}) — possible format change.")
