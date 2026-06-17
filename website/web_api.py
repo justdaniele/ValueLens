@@ -324,7 +324,7 @@ def _parse_report_sections(report_text: str) -> dict:
 
     dcf_match     = re.search(r"(?:Reverse DCF:?\*?\*?)\s*(.+?)(?=(?:Zombie|Short Interest|━|💎)|$)", clean, re.DOTALL | re.IGNORECASE)
     zombie_match  = re.search(r"(?:Zombie Detector:?\*?\*?)\s*(.+?)(?=(?:Short Interest|━|💎)|$)", clean, re.DOTALL | re.IGNORECASE)
-    short_match   = re.search(r"(?:Short Interest[^:]*:?\*?\*?)\s*(.+?)(?=(?:━|💎|Verdict)|$)", clean, re.DOTALL | re.IGNORECASE)
+    short_match   = re.search(r"(?:Short Interest[^:]*:?\*?\*?)\s*(.+?)(?=(?:━|💎|Verdict|\d+\s*/\s*100\s*SCORES|SCORES:)|$)", clean, re.DOTALL | re.IGNORECASE)
     verdict_match = re.search(r"Verdict:\s*(.+?)(?:\n|$)", clean, re.IGNORECASE)
 
     if dcf_match:    sections["dcf"]     = dcf_match.group(1).strip()[:180]
