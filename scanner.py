@@ -88,9 +88,13 @@ def get_russell1000_tickers() -> list:
     to end in "<hash>.ajax?fileType=csv...") — it now returns the product
     page's HTML instead of the file, even though it still claims a
     text/csv Content-Type. The current working source is BlackRock's
-    fund-document API, which returns the holdings as an Excel file
-    (.xls/.xlsx) rather than CSV. If this breaks again in the future, check
-    the "Data Download" link on the fund's page at
+    fund-document API. Despite being served as Content-Type:
+    application/vnd.ms-excel with a .xls filename, the actual content is
+    Microsoft's SpreadsheetML XML format (an XML dialect Excel opens
+    natively), not a real binary .xls/.xlsx — pandas.read_excel's engines
+    (xlrd/openpyxl) can't parse it, so this parses the XML directly with
+    the stdlib's ElementTree instead. If this breaks again in the future,
+    check the "Data Download" link on the fund's page at
     https://www.ishares.com/us/products/239707/ishares-russell-1000-etf
     for whatever the current endpoint/format is.
     """
@@ -106,6 +110,8 @@ def get_russell1000_tickers() -> list:
 
     logger.info("Cache missing or expired. Downloading Russell 1000 constituents from BlackRock fund-document API...")
     try:
+        import xml.etree.ElementTree as ET
+
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         url = (
             "https://www.blackrock.com/varnish-api/blk-one01-product-data/product-data/api/v1/get-fund-document"
@@ -115,45 +121,59 @@ def get_russell1000_tickers() -> list:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
 
-        from io import BytesIO
-        excel_bytes = BytesIO(response.content)
+        ns = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
+        root = ET.fromstring(response.content)
+        rows = root.findall(".//ss:Worksheet/ss:Table/ss:Row", ns)
 
-        # The holdings table has a few metadata rows above it, same as the
-        # old CSV did — read without a header first, find the row that
-        # starts with "ticker" (case-insensitive), then re-read using that
-        # row as the actual header.
-        raw = pd.read_excel(excel_bytes, header=None, engine=None)
+        if not rows:
+            raise ValueError("No rows found in iShares SpreadsheetML holdings file.")
 
+        def _row_values(row):
+            """Extracts cell text values from a SpreadsheetML <Row>, in order."""
+            return [
+                (cell.find("ss:Data", ns).text or "").strip()
+                if cell.find("ss:Data", ns) is not None else ""
+                for cell in row.findall("ss:Cell", ns)
+            ]
+
+        # Same pattern as the old CSV: a few metadata rows sit above the
+        # actual holdings table. Find the row whose first cell starts with
+        # "ticker" (case-insensitive) and treat it as the header.
         header_idx = None
-        for i in range(len(raw)):
-            first_cell = str(raw.iloc[i, 0]).strip().lower()
-            if first_cell.startswith("ticker"):
+        header_values = None
+        for i, row in enumerate(rows):
+            vals = _row_values(row)
+            if vals and vals[0].strip().lower().startswith("ticker"):
                 header_idx = i
+                header_values = vals
                 break
 
         if header_idx is None:
             raise ValueError("Could not locate holdings header row in iShares holdings file.")
 
-        excel_bytes.seek(0)
-        df = pd.read_excel(excel_bytes, header=header_idx, engine=None)
+        # Resolve column positions case-insensitively (BlackRock has
+        # changed casing on this data before).
+        col_map = {v.lower().replace("_", " ").strip(): idx for idx, v in enumerate(header_values)}
+        ticker_idx = col_map.get("ticker")
+        asset_class_idx = col_map.get("asset class")
 
-        # Resolve actual column names case-insensitively (e.g. "ticker" vs
-        # "Ticker", "asset_class" vs "Asset Class") instead of assuming one
-        # exact casing — BlackRock has changed this before.
-        col_map = {str(c).lower().replace("_", " ").strip(): c for c in df.columns}
-        ticker_col = col_map.get("ticker")
-        asset_class_col = col_map.get("asset class")
-
-        if not ticker_col:
+        if ticker_idx is None:
             raise ValueError("Ticker column not found in iShares holdings file.")
 
-        # Drop cash/derivative rows (blank ticker or non-equity asset class)
-        df = df[df[ticker_col].notna()]
-        if asset_class_col:
-            df = df[df[asset_class_col].astype(str).str.contains("Equity", case=False, na=False)]
-
-        tickers = [str(t).strip().replace(".", "-") for t in df[ticker_col].tolist() if str(t).strip()]
-        tickers = [t for t in tickers if t and t.upper() not in ("CASH", "USD", "-", "NAN")]
+        tickers = []
+        for row in rows[header_idx + 1:]:
+            vals = _row_values(row)
+            if ticker_idx >= len(vals):
+                continue
+            ticker_raw = vals[ticker_idx].strip()
+            if not ticker_raw:
+                continue
+            if asset_class_idx is not None and asset_class_idx < len(vals):
+                if "equity" not in vals[asset_class_idx].strip().lower():
+                    continue
+            ticker = ticker_raw.replace(".", "-")
+            if ticker.upper() not in ("CASH", "USD", "-"):
+                tickers.append(ticker)
 
         if len(tickers) < 500:
             raise ValueError(f"Suspiciously few tickers parsed ({len(tickers)}) — possible format change.")
