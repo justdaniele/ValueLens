@@ -494,6 +494,58 @@ nav {
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
 }
+.it-sortable { cursor: pointer; user-select: none; transition: color 0.15s; white-space: nowrap; }
+.it-sortable:hover { color: var(--text); }
+
+/* ─── Insider treemap/heatmap comparison ─── */
+.insider-viz-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--rl); padding: 18px 20px; margin-bottom: 14px;
+}
+.insider-viz-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px; gap: 12px; flex-wrap: wrap;
+}
+.insider-viz-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
+.insider-viz-title i { color: var(--amber); font-size: 15px; }
+.insider-viz-toggle { display: flex; gap: 4px; }
+.iv-toggle-btn {
+  font-size: 13px; font-weight: 600; font-family: var(--mono);
+  padding: 4px 12px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); transition: all 0.15s;
+}
+.iv-toggle-btn:hover { border-color: var(--border-hi); color: var(--text); }
+.iv-toggle-btn.active { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber); }
+.insider-viz-note {
+  font-size: 13px; color: var(--text-muted); line-height: 1.6;
+  margin: 6px 0 14px; max-width: 640px;
+}
+.insider-viz-body { position: relative; min-height: 220px; }
+.iv-pane { display: none; }
+.iv-pane.active { display: block; }
+
+/* Treemap */
+.iv-treemap-svg { width: 100%; height: 220px; display: block; }
+.iv-tm-cell { stroke: var(--bg-card); stroke-width: 2; transition: opacity 0.15s; cursor: pointer; }
+.iv-tm-cell:hover { opacity: 0.82; }
+.iv-tm-label { font-family: var(--mono); font-weight: 700; fill: #fff; pointer-events: none; }
+.iv-tm-sublabel { font-family: var(--mono); fill: rgba(255,255,255,0.75); pointer-events: none; }
+
+/* Heatmap */
+.iv-heatmap-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 5px;
+}
+.iv-hm-cell {
+  border-radius: 7px; padding: 10px 8px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; min-height: 64px; transition: transform 0.15s, opacity 0.15s;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.iv-hm-cell:hover { transform: scale(1.04); opacity: 0.9; }
+.iv-hm-ticker { font-family: var(--mono); font-weight: 700; font-size: 13px; color: #fff; }
+.iv-hm-val { font-family: var(--mono); font-size: 13px; color: rgba(255,255,255,0.8); }
 .insider-table td { padding: 11px 16px; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--border); }
 .insider-table tr:last-child td { border-bottom: none; }
 .insider-table tr:hover td { background: rgba(255,255,255,0.015); }
@@ -843,6 +895,22 @@ footer {
           <span id="ms-label" class="text-muted">Market closed</span>
         </div>
         <span class="badge-count" id="insider-count">loading...</span>
+      </div>
+    </div>
+    <div class="insider-viz-card" id="insider-viz-card" style="display:none">
+      <div class="insider-viz-header">
+        <div class="insider-viz-title"><i class="ti ti-chart-bubble"></i> Top insider buys, visualized</div>
+        <div class="insider-viz-toggle">
+          <button class="iv-toggle-btn active" id="iv-btn-treemap" onclick="switchInsiderViz('treemap')">Treemap</button>
+          <button class="iv-toggle-btn" id="iv-btn-heatmap" onclick="switchInsiderViz('heatmap')">Heatmap</button>
+        </div>
+      </div>
+      <div class="insider-viz-note" id="insider-viz-note">
+        Treemap: each tile's <b>area</b> is proportional to the dollar value of the buy — best for comparing absolute size at a glance.
+      </div>
+      <div class="insider-viz-body">
+        <div class="iv-pane active" id="iv-pane-treemap"><svg class="iv-treemap-svg" id="iv-treemap-svg" viewBox="0 0 800 220" preserveAspectRatio="none"></svg></div>
+        <div class="iv-pane" id="iv-pane-heatmap"><div class="iv-heatmap-grid" id="iv-heatmap-grid"></div></div>
       </div>
     </div>
     <div id="insiders-wrap" class="insider-wrap">
@@ -1584,9 +1652,195 @@ async function toggleInsiderRow(idx, ticker) {
   }
 }
 
-let insiderLivePrices = {};
+// ─── Treemap / Heatmap comparison ───
+// Two different visual encodings of the same "top insider buys by value"
+// data, side by side via a toggle — not a copy of any single reference
+// site's layout, but a deliberate compare-and-contrast: treemap encodes
+// magnitude through tile AREA (intuitive for "how big is this buy",
+// weaker for spotting any one ticker quickly in a busy grid), heatmap
+// encodes it through tile COLOR INTENSITY on a uniform grid (easier to
+// scan for the single biggest signal, weaker at conveying exact
+// proportions between two tiles).
+let insiderVizMode = 'treemap';
+const INSIDER_VIZ_TOP_N = 12;
+
+const IV_NOTES = {
+  treemap: "Treemap: each tile's <b>area</b> is proportional to the dollar value of the buy — best for comparing absolute size at a glance.",
+  heatmap: "Heatmap: every tile is the same size, but <b>color intensity</b> scales with dollar value — best for quickly spotting the single largest signal in a busy grid."
+};
+
+function switchInsiderViz(mode) {
+  insiderVizMode = mode;
+  document.getElementById('iv-btn-treemap').classList.toggle('active', mode === 'treemap');
+  document.getElementById('iv-btn-heatmap').classList.toggle('active', mode === 'heatmap');
+  document.getElementById('iv-pane-treemap').classList.toggle('active', mode === 'treemap');
+  document.getElementById('iv-pane-heatmap').classList.toggle('active', mode === 'heatmap');
+  document.getElementById('insider-viz-note').innerHTML = IV_NOTES[mode];
+}
+
+// Simple slice-and-dice treemap layout (alternating horizontal/vertical
+// cuts). Not a full squarified algorithm, but for ~10-12 items in a wide
+// aspect-ratio box it produces reasonably proportioned tiles without the
+// extra complexity, and stays fast and dependency-free.
+function computeTreemapLayout(items, x, y, w, h, horizontal) {
+  if (!items.length) return [];
+  if (items.length === 1) {
+    return [{ ...items[0], x, y, w, h }];
+  }
+  const total = items.reduce((s, it) => s + it.value, 0);
+  let half = 0, splitIdx = 0;
+  for (let i = 0; i < items.length; i++) {
+    half += items[i].value;
+    if (half >= total / 2) { splitIdx = i + 1; break; }
+  }
+  splitIdx = Math.max(1, Math.min(splitIdx, items.length - 1));
+  const groupA = items.slice(0, splitIdx);
+  const groupB = items.slice(splitIdx);
+  const aTotal = groupA.reduce((s, it) => s + it.value, 0);
+  const frac = aTotal / total;
+
+  if (horizontal) {
+    const wA = w * frac;
+    return [
+      ...computeTreemapLayout(groupA, x, y, wA, h, false),
+      ...computeTreemapLayout(groupB, x + wA, y, w - wA, h, false)
+    ];
+  } else {
+    const hA = h * frac;
+    return [
+      ...computeTreemapLayout(groupA, x, y, w, hA, true),
+      ...computeTreemapLayout(groupB, x, y + hA, w, h - hA, true)
+    ];
+  }
+}
+
+function renderInsiderTreemap(items) {
+  const svg = document.getElementById('iv-treemap-svg');
+  if (!svg) return;
+  const layout = computeTreemapLayout(items, 0, 0, 800, 220, true);
+
+  svg.innerHTML = layout.map(cell => {
+    const showLabel = cell.w > 50 && cell.h > 28;
+    const fontSize = Math.min(15, Math.max(11, cell.w / 8));
+    const valStr = '$' + (cell.value >= 1e6 ? (cell.value / 1e6).toFixed(1) + 'M' : (cell.value / 1e3).toFixed(0) + 'K');
+    return `
+      <g onclick="document.getElementById('${cell.ticker}-row')?.scrollIntoView({behavior:'smooth',block:'center'})">
+        <rect class="iv-tm-cell" x="${cell.x}" y="${cell.y}" width="${cell.w}" height="${cell.h}" fill="${cell.color}"></rect>
+        ${showLabel ? `
+          <text class="iv-tm-label" x="${cell.x + 8}" y="${cell.y + 18}" font-size="${fontSize}">${cell.ticker}</text>
+          <text class="iv-tm-sublabel" x="${cell.x + 8}" y="${cell.y + 34}" font-size="${Math.max(9, fontSize - 3)}">${valStr}</text>
+        ` : ''}
+      </g>`;
+  }).join('');
+}
+
+function renderInsiderHeatmap(items) {
+  const grid = document.getElementById('iv-heatmap-grid');
+  if (!grid) return;
+  const maxVal = Math.max(...items.map(it => it.value), 1);
+
+  grid.innerHTML = items.map(it => {
+    // Intensity scales 0.25–1.0 so even the smallest tile in the top-N
+    // stays visibly colored rather than fading to near-black.
+    const intensity = 0.25 + 0.75 * (it.value / maxVal);
+    const valStr = '$' + (it.value >= 1e6 ? (it.value / 1e6).toFixed(1) + 'M' : (it.value / 1e3).toFixed(0) + 'K');
+    return `
+      <div class="iv-hm-cell" style="background:rgba(217,119,6,${intensity})"
+           onclick="document.getElementById('${it.ticker}-row')?.scrollIntoView({behavior:'smooth',block:'center'})">
+        <span class="iv-hm-ticker">${it.ticker}</span>
+        <span class="iv-hm-val">${valStr}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderInsiderViz() {
+  const card = document.getElementById('insider-viz-card');
+  const withValue = insiderData.filter(r => r.total_value && r.total_value > 0);
+  if (!withValue.length) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+  if (card) card.style.display = 'block';
+
+  const top = [...withValue]
+    .sort((a, b) => b.total_value - a.total_value)
+    .slice(0, INSIDER_VIZ_TOP_N)
+    .map(r => ({ ticker: r.ticker, value: r.total_value }));
+
+  // Color scale: amber for the largest buys fading toward the site's
+  // default surface tone for smaller ones, consistent with the existing
+  // insider-section accent color (si-amber) used in the section header.
+  const maxV = Math.max(...top.map(t => t.value), 1);
+  top.forEach(t => {
+    const ratio = t.value / maxV;
+    const r = Math.round(217 * ratio + 22 * (1 - ratio));
+    const g = Math.round(119 * ratio + 32 * (1 - ratio));
+    const b = Math.round(6   * ratio + 56 * (1 - ratio));
+    t.color = `rgb(${r},${g},${b})`;
+  });
+
+  renderInsiderTreemap(top);
+  renderInsiderHeatmap(top);
+}
+
+
+let insiderSortDir = 'desc'; // 'asc' or 'desc'
+
+function sortInsiderData() {
+  const key = insiderSortKey;
+  const dir = insiderSortDir === 'asc' ? 1 : -1;
+
+  insiderData.sort((a, b) => {
+    let va, vb;
+    if (key === 'ticker') {
+      va = a.ticker || '';
+      vb = b.ticker || '';
+      return va.localeCompare(vb) * dir;
+    }
+    if (key === 'total_value') {
+      va = a.total_value || 0;
+      vb = b.total_value || 0;
+      return (va - vb) * dir;
+    }
+    if (key === 'change') {
+      const aLive = insiderLivePrices[a.ticker]?.price;
+      const bLive = insiderLivePrices[b.ticker]?.price;
+      va = (aLive && a.price_detected) ? (aLive - a.price_detected) / a.price_detected : -Infinity;
+      vb = (bLive && b.price_detected) ? (bLive - b.price_detected) / b.price_detected : -Infinity;
+      return (va - vb) * dir;
+    }
+    if (key === 'date_detected') {
+      va = a.date_detected || '';
+      vb = b.date_detected || '';
+      return va.localeCompare(vb) * dir;
+    }
+    return 0;
+  });
+}
+
+function setInsiderSort(key) {
+  if (insiderSortKey === key) {
+    insiderSortDir = insiderSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    insiderSortKey = key;
+    // Value and date default to descending (biggest/most recent first);
+    // ticker defaults to ascending (alphabetical) — matches user expectation
+    // for each column type on first click.
+    insiderSortDir = key === 'ticker' ? 'asc' : 'desc';
+  }
+  renderInsiderTable();
+}
+
+function sortIndicator(key) {
+  if (insiderSortKey !== key) return '<i class="ti ti-selector" style="opacity:0.35;font-size:12px;margin-left:3px"></i>';
+  return insiderSortDir === 'asc'
+    ? '<i class="ti ti-sort-ascending" style="font-size:12px;margin-left:3px;color:var(--green)"></i>'
+    : '<i class="ti ti-sort-descending" style="font-size:12px;margin-left:3px;color:var(--green)"></i>';
+}
+
 function renderInsiderTable() {
   const wrap = document.getElementById('insiders-wrap');
+  sortInsiderData();
   let tbody = '';
 
   insiderData.forEach((r, idx) => {
@@ -1607,7 +1861,7 @@ function renderInsiderTable() {
     const hasDetail = txCount > 0;
 
     // Main row
-    tbody += `<tr class="insider-row-main" onclick="${hasDetail ? `toggleInsiderRow(${idx}, '${r.ticker}')` : ''}">
+    tbody += `<tr class="insider-row-main" id="${r.ticker}-row" onclick="${hasDetail ? `toggleInsiderRow(${idx}, '${r.ticker}')` : ''}">
       <td>
         <span class="it-ticker mono">${r.ticker}</span>
         ${hasDetail ? `<span class="insider-chevron" id="insider-chev-${idx}">▶</span>` : ''}
@@ -1634,17 +1888,19 @@ function renderInsiderTable() {
     <table class="insider-table">
       <thead>
         <tr>
-          <th>Ticker</th>
+          <th class="it-sortable" onclick="setInsiderSort('ticker')">Ticker ${sortIndicator('ticker')}</th>
           <th>Type</th>
-          <th>Insider Value</th>
+          <th class="it-sortable" onclick="setInsiderSort('total_value')">Insider Value ${sortIndicator('total_value')}</th>
           <th>Price at Signal</th>
           <th>Current Price</th>
-          <th>Change Since Signal</th>
-          <th>Detected</th>
+          <th class="it-sortable" onclick="setInsiderSort('change')">Change Since Signal ${sortIndicator('change')}</th>
+          <th class="it-sortable" onclick="setInsiderSort('date_detected')">Detected ${sortIndicator('date_detected')}</th>
         </tr>
       </thead>
       <tbody>${tbody}</tbody>
     </table>`;
+
+  renderInsiderViz();
 }
 
 // ─── Golden Combos ───
