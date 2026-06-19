@@ -497,7 +497,7 @@ nav {
 .it-sortable { cursor: pointer; user-select: none; transition: color 0.15s; white-space: nowrap; }
 .it-sortable:hover { color: var(--text); }
 
-/* ─── Insider treemap/heatmap comparison ─── */
+/* ─── Insider treemap visualization ─── */
 .insider-viz-card {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--rl); padding: 18px 20px; margin-bottom: 14px;
@@ -508,44 +508,17 @@ nav {
 }
 .insider-viz-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
 .insider-viz-title i { color: var(--amber); font-size: 15px; }
-.insider-viz-toggle { display: flex; gap: 4px; }
-.iv-toggle-btn {
-  font-size: 13px; font-weight: 600; font-family: var(--mono);
-  padding: 4px 12px; border-radius: 20px; cursor: pointer;
-  border: 1px solid var(--border); background: transparent;
-  color: var(--text-muted); transition: all 0.15s;
-}
-.iv-toggle-btn:hover { border-color: var(--border-hi); color: var(--text); }
-.iv-toggle-btn.active { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber); }
 .insider-viz-note {
   font-size: 13px; color: var(--text-muted); line-height: 1.6;
   margin: 6px 0 14px; max-width: 640px;
 }
-.insider-viz-body { position: relative; min-height: 220px; }
-.iv-pane { display: none; }
-.iv-pane.active { display: block; }
+.insider-viz-body { position: relative; }
 
-/* Treemap */
-.iv-treemap-svg { width: 100%; height: 220px; display: block; }
+.iv-treemap-svg { width: 100%; height: 320px; display: block; }
 .iv-tm-cell { stroke: var(--bg-card); stroke-width: 2; transition: opacity 0.15s; cursor: pointer; }
 .iv-tm-cell:hover { opacity: 0.82; }
 .iv-tm-label { font-family: var(--mono); font-weight: 700; fill: #fff; pointer-events: none; }
 .iv-tm-sublabel { font-family: var(--mono); fill: rgba(255,255,255,0.75); pointer-events: none; }
-
-/* Heatmap */
-.iv-heatmap-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 5px;
-}
-.iv-hm-cell {
-  border-radius: 7px; padding: 10px 8px; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; min-height: 64px; transition: transform 0.15s, opacity 0.15s;
-  border: 1px solid rgba(255,255,255,0.06);
-}
-.iv-hm-cell:hover { transform: scale(1.04); opacity: 0.9; }
-.iv-hm-ticker { font-family: var(--mono); font-weight: 700; font-size: 13px; color: #fff; }
-.iv-hm-val { font-family: var(--mono); font-size: 13px; color: rgba(255,255,255,0.8); }
 .insider-table td { padding: 11px 16px; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--border); }
 .insider-table tr:last-child td { border-bottom: none; }
 .insider-table tr:hover td { background: rgba(255,255,255,0.015); }
@@ -900,17 +873,12 @@ footer {
     <div class="insider-viz-card" id="insider-viz-card" style="display:none">
       <div class="insider-viz-header">
         <div class="insider-viz-title"><i class="ti ti-chart-bubble"></i> Top insider buys, visualized</div>
-        <div class="insider-viz-toggle">
-          <button class="iv-toggle-btn active" id="iv-btn-treemap" onclick="switchInsiderViz('treemap')">Treemap</button>
-          <button class="iv-toggle-btn" id="iv-btn-heatmap" onclick="switchInsiderViz('heatmap')">Heatmap</button>
-        </div>
       </div>
       <div class="insider-viz-note" id="insider-viz-note">
-        Treemap: each tile's <b>area</b> is proportional to the dollar value of the buy — best for comparing absolute size at a glance.
+        Each tile's <b>area</b> is proportional to the dollar value of the buy — bigger box, bigger purchase.
       </div>
       <div class="insider-viz-body">
-        <div class="iv-pane active" id="iv-pane-treemap"><svg class="iv-treemap-svg" id="iv-treemap-svg" viewBox="0 0 800 220" preserveAspectRatio="none"></svg></div>
-        <div class="iv-pane" id="iv-pane-heatmap"><div class="iv-heatmap-grid" id="iv-heatmap-grid"></div></div>
+        <svg class="iv-treemap-svg" id="iv-treemap-svg" viewBox="0 0 800 320" preserveAspectRatio="none"></svg>
       </div>
     </div>
     <div id="insiders-wrap" class="insider-wrap">
@@ -1673,31 +1641,8 @@ async function toggleInsiderRow(idx, ticker) {
   }
 }
 
-// ─── Treemap / Heatmap comparison ───
-// Two different visual encodings of the same "top insider buys by value"
-// data, side by side via a toggle — not a copy of any single reference
-// site's layout, but a deliberate compare-and-contrast: treemap encodes
-// magnitude through tile AREA (intuitive for "how big is this buy",
-// weaker for spotting any one ticker quickly in a busy grid), heatmap
-// encodes it through tile COLOR INTENSITY on a uniform grid (easier to
-// scan for the single biggest signal, weaker at conveying exact
-// proportions between two tiles).
-let insiderVizMode = 'treemap';
+// ─── Insider buy treemap ───
 const INSIDER_VIZ_TOP_N = 12;
-
-const IV_NOTES = {
-  treemap: "Treemap: each tile's <b>area</b> is proportional to the dollar value of the buy — best for comparing absolute size at a glance.",
-  heatmap: "Heatmap: every tile is the same size, but <b>color intensity</b> scales with dollar value — best for quickly spotting the single largest signal in a busy grid."
-};
-
-function switchInsiderViz(mode) {
-  insiderVizMode = mode;
-  document.getElementById('iv-btn-treemap').classList.toggle('active', mode === 'treemap');
-  document.getElementById('iv-btn-heatmap').classList.toggle('active', mode === 'heatmap');
-  document.getElementById('iv-pane-treemap').classList.toggle('active', mode === 'treemap');
-  document.getElementById('iv-pane-heatmap').classList.toggle('active', mode === 'heatmap');
-  document.getElementById('insider-viz-note').innerHTML = IV_NOTES[mode];
-}
 
 // Simple slice-and-dice treemap layout (alternating horizontal/vertical
 // cuts). Not a full squarified algorithm, but for ~10-12 items in a wide
@@ -1738,7 +1683,7 @@ function computeTreemapLayout(items, x, y, w, h, horizontal) {
 function renderInsiderTreemap(items) {
   const svg = document.getElementById('iv-treemap-svg');
   if (!svg) return;
-  const layout = computeTreemapLayout(items, 0, 0, 800, 220, true);
+  const layout = computeTreemapLayout(items, 0, 0, 800, 320, true);
 
   svg.innerHTML = layout.map(cell => {
     const showLabel = cell.w > 50 && cell.h > 28;
@@ -1752,25 +1697,6 @@ function renderInsiderTreemap(items) {
           <text class="iv-tm-sublabel" x="${cell.x + 8}" y="${cell.y + 34}" font-size="${Math.max(9, fontSize - 3)}">${valStr}</text>
         ` : ''}
       </g>`;
-  }).join('');
-}
-
-function renderInsiderHeatmap(items) {
-  const grid = document.getElementById('iv-heatmap-grid');
-  if (!grid) return;
-  const maxVal = Math.max(...items.map(it => it.value), 1);
-
-  grid.innerHTML = items.map(it => {
-    // Intensity scales 0.25–1.0 so even the smallest tile in the top-N
-    // stays visibly colored rather than fading to near-black.
-    const intensity = 0.25 + 0.75 * (it.value / maxVal);
-    const valStr = '$' + (it.value >= 1e6 ? (it.value / 1e6).toFixed(1) + 'M' : (it.value / 1e3).toFixed(0) + 'K');
-    return `
-      <div class="iv-hm-cell" style="background:rgba(217,119,6,${intensity})"
-           onclick="document.getElementById('${it.ticker}-row')?.scrollIntoView({behavior:'smooth',block:'center'})">
-        <span class="iv-hm-ticker">${it.ticker}</span>
-        <span class="iv-hm-val">${valStr}</span>
-      </div>`;
   }).join('');
 }
 
@@ -1801,7 +1727,6 @@ function renderInsiderViz() {
   });
 
   renderInsiderTreemap(top);
-  renderInsiderHeatmap(top);
 }
 
 
