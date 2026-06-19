@@ -1618,6 +1618,16 @@ async function fetchInsiderLivePrices() {
   }
 }
 
+// Tracks which tickers have their detail row expanded, and caches the
+// already-rendered transaction HTML per ticker. Needed because
+// renderInsiderTable() rebuilds the entire table's innerHTML every time it
+// runs (including every second via the live price poller) — without this,
+// any row the user expanded would silently collapse and lose its loaded
+// content the next time the table re-rendered, which is exactly the
+// "opens for a moment then disappears" bug this fixes.
+const openInsiderRows = new Set();
+const insiderTransactionsHtmlCache = {};
+
 async function toggleInsiderRow(idx, ticker) {
   const detail = document.getElementById(`insider-detail-${idx}`);
   const chev   = document.getElementById(`insider-chev-${idx}`);
@@ -1625,30 +1635,41 @@ async function toggleInsiderRow(idx, ticker) {
   const isOpen = detail.classList.contains('open');
   detail.classList.toggle('open', !isOpen);
   if (chev) chev.classList.toggle('open', !isOpen);
-  if (!isOpen && detail.dataset.loaded !== '1') {
-    detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--text-muted);font-size: 13px">Loading...</span>';
-    try {
-      const txs = await fetchJSON('/api/insider_transactions/' + ticker);
-      const fallbackUrl = 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + ticker + '&type=4&owner=include&count=10';
-      const lines = txs.length ? txs.map(tx => {
-        const name   = tx.insider_name || 'Insider';
-        const role   = tx.title ? ' <span class="insider-tx-role">— ' + tx.title + '</span>' : '';
-        const shares = tx.shares > 0 ? Number(tx.shares).toLocaleString() + ' shares' : '';
-        const price  = tx.price > 0 ? ' @ $' + tx.price.toFixed(2) : '';
-        const val    = tx.total_value > 0 ? ' = $' + Number(tx.total_value).toLocaleString(undefined,{maximumFractionDigits:0}) : '';
-        const secUrl = tx.sec_url || fallbackUrl;
-        return '<div class="insider-tx">'
-          + '<span class="insider-tx-name">' + name + role + '</span>'
-          + '<span class="insider-tx-detail">' + shares + price + val + '</span>'
-          + '<span class="insider-tx-date">' + (tx.date || '') + '</span>'
-          + '<a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a>'
-          + '</div>';
-      }).join('') : '<span style="color:var(--text-muted);font-size: 13px">No P-code purchases found in last 90 days.</span>';
-      detail.querySelector('.insider-detail-inner').innerHTML = lines;
-      detail.dataset.loaded = '1';
-    } catch(e) {
-      detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--red);font-size: 13px">Failed to load.</span>';
-    }
+
+  if (isOpen) {
+    openInsiderRows.delete(ticker);
+    return;
+  }
+  openInsiderRows.add(ticker);
+
+  if (insiderTransactionsHtmlCache[ticker]) {
+    detail.querySelector('.insider-detail-inner').innerHTML = insiderTransactionsHtmlCache[ticker];
+    return;
+  }
+
+  detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--text-muted);font-size: 13px">Loading...</span>';
+  try {
+    const txs = await fetchJSON('/api/insider_transactions/' + ticker);
+    const fallbackUrl = 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + ticker + '&type=4&owner=include&count=10';
+    const lines = txs.length ? txs.map(tx => {
+      const name   = tx.insider_name || 'Insider';
+      const role   = tx.title ? ' <span class="insider-tx-role">— ' + tx.title + '</span>' : '';
+      const shares = tx.shares > 0 ? Number(tx.shares).toLocaleString() + ' shares' : '';
+      const price  = tx.price > 0 ? ' @ $' + tx.price.toFixed(2) : '';
+      const val    = tx.total_value > 0 ? ' = $' + Number(tx.total_value).toLocaleString(undefined,{maximumFractionDigits:0}) : '';
+      const secUrl = tx.sec_url || fallbackUrl;
+      return '<div class="insider-tx">'
+        + '<span class="insider-tx-name">' + name + role + '</span>'
+        + '<span class="insider-tx-detail">' + shares + price + val + '</span>'
+        + '<span class="insider-tx-date">' + (tx.date || '') + '</span>'
+        + '<a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a>'
+        + '</div>';
+    }).join('') : '<span style="color:var(--text-muted);font-size: 13px">No P-code purchases found in last 90 days.</span>';
+    insiderTransactionsHtmlCache[ticker] = lines;
+    detail.querySelector('.insider-detail-inner').innerHTML = lines;
+  } catch(e) {
+    detail.querySelector('.insider-detail-inner').innerHTML = '<span style="color:var(--red);font-size: 13px">Failed to load.</span>';
+    // Don't cache failures — let the next expand attempt retry the fetch.
   }
 }
 
@@ -1901,6 +1922,24 @@ function renderInsiderTable() {
       </thead>
       <tbody>${tbody}</tbody>
     </table>`;
+
+  // Restore expanded rows that survived this re-render — the HTML above
+  // was just rebuilt from scratch, so every detail row starts collapsed
+  // regardless of what the user had open a moment ago. Re-apply the
+  // 'open' state and any already-fetched transaction HTML for tickers
+  // still in openInsiderRows (a fetch in flight when this render fires
+  // will still land normally and populate the row once it resolves).
+  insiderData.forEach((r, idx) => {
+    if (!openInsiderRows.has(r.ticker)) return;
+    const detail = document.getElementById(`insider-detail-${idx}`);
+    const chev   = document.getElementById(`insider-chev-${idx}`);
+    if (!detail) return;
+    detail.classList.add('open');
+    if (chev) chev.classList.add('open');
+    if (insiderTransactionsHtmlCache[r.ticker]) {
+      detail.querySelector('.insider-detail-inner').innerHTML = insiderTransactionsHtmlCache[r.ticker];
+    }
+  });
 
   renderInsiderViz();
 }
