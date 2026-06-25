@@ -56,7 +56,7 @@ _TICKER_NORMALIZE_MAP = {
     "UHALB": "UHAL-B",
 }
 
-def _normalize_ticker(ticker: str) -> str | None:
+def _normalize_ticker(ticker: str):
     """Returns the Yahoo Finance-compatible ticker, or None if blacklisted.
     Callers should skip the ticker entirely when None is returned.
     """
