@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ValueLens — Automated Equity Intelligence</title>
+<title>ValueLens - Automated Equity Intelligence</title>
 <meta name="description" content="Institutional-grade equity intelligence. AI-powered fundamental analysis of S&P 500 and Nasdaq 100, delivered every morning." />
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#1D9E75"/>
@@ -1015,6 +1015,16 @@ footer {
 // Via Tailscale domain: https://your-machine.ts.net (port must be exposed)
 const API_BASE = 'https://valuelens.uk';
 
+// ─── Date formatting ───
+// Converts YYYY-MM-DD (the format stored in SQLite and returned by the API)
+// to DD/MM/YYYY (European format). Falls back gracefully to the original
+// string for any value that doesn't match the expected pattern.
+function fmtDate(str) {
+  if (!str) return '—';
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : str;
+}
+
 let picksData = [];
 const chartInstances = {};
 
@@ -1525,7 +1535,7 @@ function renderEarningsTable(data) {
       ? '<span class="earn-evaluated earn-eval-yes">&#10003; Released</span>'
       : '<span class="earn-evaluated earn-eval-no">Upcoming</span>';
 
-    const dateCell = r.earnings_date || r.timestamp || '—';
+    const dateCell = fmtDate(r.earnings_date || r.timestamp);
 
     return '<tr>' +
       '<td><span class="earn-ticker">' + r.ticker + '</span></td>' +
@@ -1629,7 +1639,7 @@ async function toggleInsiderRow(idx, ticker) {
       return '<div class="insider-tx">'
         + '<span class="insider-tx-name">' + name + role + '</span>'
         + '<span class="insider-tx-detail">' + shares + price + val + '</span>'
-        + '<span class="insider-tx-date">' + (tx.date || '') + '</span>'
+        + '<span class="insider-tx-date">' + fmtDate(tx.date) + '</span>'
         + '<a class="insider-tx-sec" href="' + secUrl + '" target="_blank" rel="noopener">SEC ↗</a>'
         + '</div>';
     }).join('') : '<span style="color:var(--text-muted);font-size: 13px">No P-code purchases found in last 90 days.</span>';
@@ -1819,7 +1829,7 @@ function renderInsiderTable() {
       <td><span class="it-price">$${Number(r.price_detected || 0).toFixed(2)}</span></td>
       <td><span class="it-price" data-live-ticker="${r.ticker}">${livePrice ? '$' + livePrice.toFixed(2) : '—'}</span></td>
       <td>${changeCell}</td>
-      <td><span class="it-date">${r.date_detected || '—'}</span></td>
+      <td><span class="it-date">${fmtDate(r.date_detected)}</span></td>
     </tr>`;
 
     // Detail row — loaded on-demand when user clicks to expand
@@ -1913,7 +1923,7 @@ async function loadCombos() {
           </div>
           <div class="combo-detail">
             <div class="combo-detail-label">Date detected</div>
-            <div class="combo-detail-val">${c.date_detected || '—'}</div>
+            <div class="combo-detail-val">${fmtDate(c.date_detected)}</div>
           </div>
         </div>
       </div>`;
