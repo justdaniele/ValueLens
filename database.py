@@ -131,26 +131,26 @@ def init_db():
     logger.info("Database schema initialized and fully matched with tracking engines.")
 
 
-def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None):
+def save_report_to_db(ticker, report_text, lang="en", current_price=None, target_price=None, universe_source="sp500"):
     """Saves a generated AI report to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price)
-        VALUES (?, ?, ?, ?, ?)
-    """, (ticker, report_text, lang, current_price, target_price))
+        INSERT INTO nightly_reports (ticker, report_text, lang, current_price, target_price, universe_source)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (ticker, report_text, lang, current_price, target_price, universe_source))
     conn.commit()
     conn.close()
 
 
-def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0):
+def save_earnings_prediction(ticker, price_at_signal, prediction, ees_score=0, earnings_date=None):
     """Saves a dynamic earnings sniper prediction to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score)
-        VALUES (?, ?, ?, ?)
-    """, (ticker, price_at_signal, prediction, ees_score))
+        INSERT INTO earnings_predictions (ticker, price_at_signal, prediction, ees_score, earnings_date)
+        VALUES (?, ?, ?, ?, ?)
+    """, (ticker, price_at_signal, prediction, ees_score, earnings_date))
     conn.commit()
     conn.close()
 
@@ -284,6 +284,43 @@ def record_alert_sent(ticker: str, alert_type: str = "fundamental"):
     )
     conn.commit()
     conn.close()
+
+def upsert_insider_signal(ticker: str, price_detected: float, total_value: float, num_transactions: int):
+    """Records a new insider-buy detection, accumulating with any prior
+    detections instead of discarding them via INSERT OR IGNORE.
+
+    If the ticker already has a row, adds the new total_value and
+    num_transactions to the existing totals and updates date_detected
+    and price_detected to the most recent detection. If no row exists,
+    inserts one normally.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT total_value, num_transactions FROM insider_signals WHERE ticker = ?", (ticker,))
+    existing = cursor.fetchone()
+
+    if existing:
+        new_total = (existing[0] or 0.0) + total_value
+        new_count = (existing[1] or 0) + num_transactions
+        cursor.execute("""
+            UPDATE insider_signals
+            SET date_detected = date('now'),
+                price_detected = ?,
+                total_value = ?,
+                num_transactions = ?,
+                status = 'ACTIVE'
+            WHERE ticker = ?
+        """, (price_detected, new_total, new_count, ticker))
+    else:
+        cursor.execute("""
+            INSERT INTO insider_signals
+            (ticker, date_detected, price_detected, total_value, num_transactions)
+            VALUES (?, date('now'), ?, ?, ?)
+        """, (ticker, price_detected, total_value, num_transactions))
+
+    conn.commit()
+    conn.close()
+
 
 def save_insider_transactions(ticker: str, transactions: list):
     """Saves individual Form 4 P-code transactions to the database.
