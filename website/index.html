@@ -1424,7 +1424,7 @@ function toggleChart(i, ticker) {
         },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { title: items => items.length ? fmtDate(items[0].label) : '' } } },
           scales: {
             x: { ticks: { color: '#475569', font: { size: 9, family: 'JetBrains Mono' }, maxTicksLimit: 6, callback: function(val, idx) { return fmtDate(this.getLabelForValue(val)); } }, grid: { color: 'rgba(255,255,255,0.04)' }, border: { display: false } },
             y: { ticks: { color: '#475569', font: { size: 9, family: 'JetBrains Mono' }, callback: v => '$' + v.toFixed(0) }, grid: { color: 'rgba(255,255,255,0.04)' }, border: { display: false } }
