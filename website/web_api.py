@@ -587,12 +587,17 @@ def golden_combos():
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT DISTINCT nr.ticker, nr.current_price, nr.target_price,
+        SELECT nr.ticker, nr.current_price, nr.target_price,
                nr.date_generated, ins.date_detected, ins.total_value
-        FROM nightly_reports nr
+        FROM (
+            SELECT ticker, current_price, target_price, date_generated,
+                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date_generated DESC) AS rn
+            FROM nightly_reports
+            WHERE date(date_generated) >= date('now', '-30 days')
+              AND lang = 'en'
+        ) nr
         JOIN insider_signals ins ON nr.ticker = ins.ticker
-        WHERE date(nr.date_generated) >= date('now', '-30 days')
-          AND nr.lang = 'en'
+        WHERE nr.rn = 1
         ORDER BY nr.date_generated DESC
     """)
     rows = cursor.fetchall()
