@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ValueLens - Automated Equity Intelligence</title>
+<title>ValueLens: Automated Equity Intelligence</title>
 <meta name="description" content="Institutional-grade equity intelligence. AI-powered fundamental analysis of S&P 500 and Nasdaq 100, delivered every morning." />
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#1D9E75"/>
@@ -469,7 +469,8 @@ nav {
 .pick-chart-inner { position: relative; height: 110px; margin-top: 10px; }
 
 /* ─── Insider table ─── */
-.insider-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--rl); overflow: hidden; }
+.insider-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--rl); overflow: hidden; max-height: 540px; overflow-y: auto; }
+.insider-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-surface); }
 .insider-table { width: 100%; border-collapse: collapse; }
 .insider-row-main { cursor: pointer; transition: background 0.15s; }
 .insider-row-main:hover td { background: rgba(255,255,255,0.03) !important; }
