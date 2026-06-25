@@ -28,10 +28,43 @@ CHANNEL_ID_EN = os.environ.get("TELEGRAM_CHANNEL_ID_EN", "")
 # Which universes to scan — change via .env: SCAN_UNIVERSE=sp500,nasdaq100,sp400,russell1000
 SCAN_UNIVERSE = os.environ.get("SCAN_UNIVERSE", "sp500,nasdaq100,sp400,russell1000").lower()
 
+# ---------------------------------------------------------------------------
+# Ticker normalization
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Shared HTML sanitiser
-# ---------------------------------------------------------------------------
+# Some index constituent files use share class suffixes without a separator
+# (e.g. "BRKB", "BFB", "LENB") while Yahoo Finance requires a dot or dash
+# (e.g. "BRK-B", "BF.B", "LEN.B"). This map converts known problematic
+# tickers before any yfinance call so they resolve correctly instead of
+# triggering a "possibly delisted" warning and wasting two API calls.
+# Add new entries here whenever a ticker starts showing "possibly delisted"
+# errors despite being a live, valid security.
+# Tickers with no valid Yahoo Finance US listing — European-only securities,
+# delisted names, or symbols that consistently return no data. These are
+# excluded before any yfinance call to avoid wasted API requests and log noise.
+_TICKER_BLACKLIST = {
+    "HEIA",   # Heineken — Amsterdam-listed only, no US ADR on Yahoo
+    "HOLX",   # Hologic — acquired by Blackstone/TPG, delisted from Nasdaq
+    "LENB",   # Lennar class B — no valid Yahoo Finance US listing
+    "BFA",    # Brown-Forman A — delisted or no Yahoo data
+}
+
+_TICKER_NORMALIZE_MAP = {
+    "BRKB":  "BRK-B",
+    "BRKA":  "BRK-A",
+    "BFB":   "BF-B",
+    "UHALB": "UHAL-B",
+}
+
+def _normalize_ticker(ticker: str) -> str | None:
+    """Returns the Yahoo Finance-compatible ticker, or None if blacklisted.
+    Callers should skip the ticker entirely when None is returned.
+    """
+    t = ticker.upper()
+    if t in _TICKER_BLACKLIST:
+        return None
+    return _TICKER_NORMALIZE_MAP.get(t, ticker)
+
 
 def _sanitise_html(text: str) -> str:
     """Escapes raw text then restores the HTML tags ValueLens intentionally uses."""
@@ -359,7 +392,10 @@ def filter_value_universe(tickers: list, max_candidates=150, sleep_seconds=0.05)
         if i % 100 == 0 and i > 0:
             logger.info(f"Filter progress: {i}/{len(tickers)}...")
         try:
-            f_info  = yf.Ticker(ticker).fast_info
+            yt = _normalize_ticker(ticker)
+            if yt is None:
+                continue
+            f_info  = yf.Ticker(yt).fast_info
             high    = getattr(f_info, 'year_high', None) or getattr(f_info, 'yearHigh', None)
             current = getattr(f_info, 'last_price', None) or getattr(f_info, 'lastPrice', None)
 
@@ -431,7 +467,10 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
         universe_source = item.get("universe_source", "sp500")
         try:
             logger.info(f"Deep scan: {ticker}...")
-            info = yf.Ticker(ticker).info
+            yt = _normalize_ticker(ticker)
+            if yt is None:
+                continue
+            info = yf.Ticker(yt).info
 
             current        = info.get("currentPrice") or info.get("regularMarketPrice")
             target_mean_1y = info.get("targetMeanPrice")
@@ -485,7 +524,10 @@ def deep_value_screen(tickers_list: list, max_candidates=15,
 def generate_target_chart(ticker: str, current_price: float, target_price: float):
     """Generates a dark-themed 1-year price chart with analyst target overlay."""
     try:
-        hist = yf.Ticker(ticker).history(period="1y")
+        yt = _normalize_ticker(ticker)
+        if yt is None:
+            return None
+        hist = yf.Ticker(yt).history(period="1y")
         if hist.empty:
             return None
 
