@@ -577,18 +577,21 @@ def insiders():
 @app.route("/api/golden_combos")
 def golden_combos():
     """
-    Returns tickers that appear in both nightly_reports (last 7 days)
+    Returns tickers that appear in both nightly_reports (last 30 days)
     and insider_signals simultaneously — the Golden Combo condition.
+
+    Window is 30 days so a ticker picked by the AI more than a week ago
+    still shows as a golden combo when a fresh insider buy lands after it.
     """
     conn = get_db()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT DISTINCT nr.ticker, nr.current_price, nr.target_price,
-               nr.date_generated, ins.date_detected
+               nr.date_generated, ins.date_detected, ins.total_value
         FROM nightly_reports nr
         JOIN insider_signals ins ON nr.ticker = ins.ticker
-        WHERE date(nr.date_generated) >= date('now', '-7 days')
+        WHERE date(nr.date_generated) >= date('now', '-30 days')
           AND nr.lang = 'en'
         ORDER BY nr.date_generated DESC
     """)
@@ -608,14 +611,14 @@ def golden_combos():
 
         tv = r["total_value"] if r["total_value"] else 0.0
         result.append({
-            "ticker":         r["ticker"],
-            "name":           r["ticker"],
-            "price":          r["current_price"],
-            "target":         r["target_price"],
-            "score":          score,
-            "insider_value":  f"${tv:,.0f}" if tv and tv > 0 else None,
+            "ticker":             r["ticker"],
+            "name":               r["ticker"],
+            "price":              r["current_price"],
+            "target":             r["target_price"],
+            "score":              score,
+            "insider_value":      f"${tv:,.0f}" if tv and tv > 0 else None,
             "price_at_detection": r["current_price"],
-            "date_detected": r["date_detected"][:10] if r["date_detected"] else None,
+            "date_detected":      r["date_detected"][:10] if r["date_detected"] else None,
             "description": (
                 f"AI fundamental scan flagged {r['ticker']} as high-conviction, "
                 f"and C-suite executives have executed open-market purchases. "
